@@ -1,0 +1,32 @@
+# 収集データ (各自の環境で育つもの。共有しない)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# 生成物
+reports/
+*.html
+!ttradar/report/templates/*.html.j2
+
+# 秘密情報
+.env
+config.yaml
+config.yml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS / エディタ
+.DS_Store
+.idea/
+.vscode/

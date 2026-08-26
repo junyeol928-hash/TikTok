@@ -1,0 +1,71 @@
+# ttradar 設定ファイル
+# 秘密情報 (Webhook URL / API キー) はここに書かず .env か環境変数に置くこと。
+
+regions: [JP]                 # 対象国。US, GB なども可 (Creative Center の対応国)
+
+sources:                      # 収集元。上から順に実行される
+  - creative_center           # 公式 Creative Center の JSON API (認証不要 / 高速)
+  - browser_creative_center   # 実ブラウザで開いて XHR 傍受 (低速だが壊れにくい)
+  # - ytdlp_watch             # watchlist のクリエイターを定点観測
+  # - thirdparty              # 有料分析サービス (下の thirdparty_apis を参照)
+
+entity_types: [hashtag, song, video, product, keyword]
+
+limit_per_type: 50            # 1 種別あたりの取得件数
+period_days: 7                # Creative Center の集計期間 (7 / 30 / 120)
+
+# --- 分析 ---
+growth_window_hours: 24       # 伸び率を測る比較窓
+min_volume: 100               # これ未満の小さすぎるものは無視
+alert_threshold: 70           # このスコア以上を通知
+notify_cooldown_hours: 48     # 同じものを再通知しない時間
+
+weights:                      # ハッシュタグ/楽曲/キーワード用の重み
+  growth: 0.35                #   伸び率
+  acceleration: 0.25          #   加速度 (伸びが伸びているか)
+  volume: 0.15                #   絶対ボリューム
+  freshness: 0.10             #   新しさ
+  competition: 0.15           #   競合の少なさ
+
+product_weights:              # 商品用の重み
+  sales_velocity: 0.30        #   売れ行きの伸び
+  commission: 0.20            #   報酬率
+  low_competition: 0.20       #   紹介動画がまだ少ない
+  trend_stage: 0.15           #   上昇フェーズか
+  price_fit: 0.10             #   衝動買いしやすい価格帯か
+  rating: 0.05                #   レビュー評価
+
+price_sweet_spot: [1000, 6000]   # 衝動買いされやすい価格帯 (円)
+
+# 自分のニッチ。ここに合致するものはスコアを 15% 加点する
+my_niches: []
+# 例: my_niches: [美容, コスメ, 時短, キッチン]
+
+# --- 出力 ---
+top_n: 15
+report_dir: reports
+db_path: data/ttradar.db
+notify_channels: []           # slack / discord / email / file
+# 例: notify_channels: [slack, file]
+
+# --- 動作 ---
+request_interval: 1.2         # 同一ホストへの最小リクエスト間隔 (秒). 下げすぎない
+headless: true
+keep_days: 180
+
+# --- 有料分析サービスを使う場合 (任意) ---
+# thirdparty_apis:
+#   - name: kalodata
+#     base_url: https://api.example.com/v1
+#     path: /product/rank
+#     api_key_env: KALODATA_API_KEY
+#     auth: header
+#     auth_name: X-API-KEY
+#     entity_type: product
+#     params: {country: JP, period: 7}
+#     field_map:
+#       name: productName
+#       sales: salesCount
+#       price: price
+#       commission_rate: commissionRate
+#       related_videos: videoCount

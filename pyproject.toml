@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ttradar"
+version = "0.1.0"
+description = "TikTok の伸びている商品・トレンドを継続監視するツール"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "requests>=2.31",
+    "PyYAML>=6.0",
+    "Jinja2>=3.1",
+    "rich>=13.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# ブラウザ経由の収集 (仕様変更に強い。定期実行の本命)
+browser = ["playwright>=1.40"]
+# クリエイター定点観測
+creators = ["yt-dlp>=2024.1.1"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+all = ["playwright>=1.40", "yt-dlp>=2024.1.1"]
+
+[project.scripts]
+ttradar = "ttradar.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ttradar*"]
+
+[tool.setuptools.package-data]
+ttradar = ["report/templates/*.j2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

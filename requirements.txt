@@ -1,0 +1,13 @@
+# コア (必須)
+requests>=2.31
+PyYAML>=6.0
+Jinja2>=3.1
+rich>=13.0
+python-dotenv>=1.0
+
+# 任意: ブラウザ経由の収集 (TikTok の仕様変更に強い。定期実行はこちらを推奨)
+#   pip install playwright && playwright install chromium
+playwright>=1.40
+
+# 任意: 競合クリエイターの定点観測
+yt-dlp>=2024.1.1

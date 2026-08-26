@@ -1,0 +1,64 @@
+# TikTok トレンドを定期収集し、レポートを成果物として残すワークフロー。
+#
+# 使い方:
+#   1. リポジトリの Settings > Secrets and variables > Actions で
+#      TTRADAR_SLACK_WEBHOOK などを登録する
+#   2. 下の cron を好きな時刻に変える (UTC 指定なので日本時間 -9 時間)
+#
+# 注意: GitHub Actions のランナーから TikTok に到達できるかは保証されません。
+#       到達できない場合は手元の PC か VPS で cron 実行してください。
+name: TikTok Trend Radar
+
+on:
+  schedule:
+    # 日本時間 08:00 / 20:00 (UTC 23:00 / 11:00)
+    - cron: "0 23 * * *"
+    - cron: "0 11 * * *"
+  workflow_dispatch:        # 手動実行も可能
+
+permissions:
+  contents: write           # DB をコミットして履歴を貯めるため
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 依存をインストール
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[browser]"
+          playwright install --with-deps chromium
+
+      - name: 設定を用意
+        run: |
+          if [ ! -f config.yaml ]; then ttradar init; fi
+
+      # 履歴 DB を artifact から復元する。
+      # 伸び率は履歴が無いと計算できないため、実行間で必ず引き継ぐこと。
+      - name: 前回の DB を復元
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: ttradar-db-${{ github.run_id }}
+          restore-keys: ttradar-db-
+
+      - name: 収集・分析・通知
+        env:
+          TTRADAR_SLACK_WEBHOOK: ${{ secrets.TTRADAR_SLACK_WEBHOOK }}
+          TTRADAR_DISCORD_WEBHOOK: ${{ secrets.TTRADAR_DISCORD_WEBHOOK }}
+        run: ttradar run || echo "収集に失敗しました (到達性を確認してください)"
+
+      - name: レポートを保存
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-${{ github.run_number }}
+          path: reports/
+          retention-days: 30

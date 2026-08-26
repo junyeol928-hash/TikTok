@@ -1,0 +1,455 @@
+"""ttradar のコマンドラインインターフェース.
+
+    ttradar init            設定ファイルを作る
+    ttradar doctor          動作環境と到達性を診断する
+    ttradar collect         トレンドを収集して DB に保存
+    ttradar report          分析してランキング表示 / HTML 出力
+    ttradar run             collect + report + notify (定期実行はこれ)
+    ttradar watch           追跡リスト (競合クリエイター等) の管理
+    ttradar demo            オフラインのサンプルデータで一通り体験する
+    ttradar sources         利用可能な収集元を一覧
+    ttradar prune           古いデータを掃除
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from . import __version__
+from .config import Config
+from .db import Database
+from .models import EntityType
+from .util.log import get, setup
+
+# collector をレジストリに登録するため副作用 import が必要
+from .collectors import (base, browser, creative_center,  # noqa: F401
+                         demo as demo_mod, thirdparty, ytdlp_source)
+
+log = get(__name__)
+
+CONFIG_TEMPLATE = """\
+# ttradar 設定ファイル
+# 秘密情報 (Webhook URL / API キー) はここに書かず .env か環境変数に置くこと。
+
+regions: [JP]                 # 対象国。US, GB なども可 (Creative Center の対応国)
+
+sources:                      # 収集元。上から順に実行される
+  - creative_center           # 公式 Creative Center の JSON API (認証不要 / 高速)
+  - browser_creative_center   # 実ブラウザで開いて XHR 傍受 (低速だが壊れにくい)
+  # - ytdlp_watch             # watchlist のクリエイターを定点観測
+  # - thirdparty              # 有料分析サービス (下の thirdparty_apis を参照)
+
+entity_types: [hashtag, song, video, product, keyword]
+
+limit_per_type: 50            # 1 種別あたりの取得件数
+period_days: 7                # Creative Center の集計期間 (7 / 30 / 120)
+
+# --- 分析 ---
+growth_window_hours: 24       # 伸び率を測る比較窓
+min_volume: 100               # これ未満の小さすぎるものは無視
+alert_threshold: 70           # このスコア以上を通知
+notify_cooldown_hours: 48     # 同じものを再通知しない時間
+
+weights:                      # ハッシュタグ/楽曲/キーワード用の重み
+  growth: 0.35                #   伸び率
+  acceleration: 0.25          #   加速度 (伸びが伸びているか)
+  volume: 0.15                #   絶対ボリューム
+  freshness: 0.10             #   新しさ
+  competition: 0.15           #   競合の少なさ
+
+product_weights:              # 商品用の重み
+  sales_velocity: 0.30        #   売れ行きの伸び
+  commission: 0.20            #   報酬率
+  low_competition: 0.20       #   紹介動画がまだ少ない
+  trend_stage: 0.15           #   上昇フェーズか
+  price_fit: 0.10             #   衝動買いしやすい価格帯か
+  rating: 0.05                #   レビュー評価
+
+price_sweet_spot: [1000, 6000]   # 衝動買いされやすい価格帯 (円)
+
+# 自分のニッチ。ここに合致するものはスコアを 15% 加点する
+my_niches: []
+# 例: my_niches: [美容, コスメ, 時短, キッチン]
+
+# --- 出力 ---
+top_n: 15
+report_dir: reports
+db_path: data/ttradar.db
+notify_channels: []           # slack / discord / email / file
+# 例: notify_channels: [slack, file]
+
+# --- 動作 ---
+request_interval: 1.2         # 同一ホストへの最小リクエスト間隔 (秒). 下げすぎない
+headless: true
+keep_days: 180
+
+# --- 有料分析サービスを使う場合 (任意) ---
+# thirdparty_apis:
+#   - name: kalodata
+#     base_url: https://api.example.com/v1
+#     path: /product/rank
+#     api_key_env: KALODATA_API_KEY
+#     auth: header
+#     auth_name: X-API-KEY
+#     entity_type: product
+#     params: {country: JP, period: 7}
+#     field_map:
+#       name: productName
+#       sales: salesCount
+#       price: price
+#       commission_rate: commissionRate
+#       related_videos: videoCount
+"""
+
+
+def _db(cfg: Config) -> Database:
+    return Database(cfg.db_path)
+
+
+# ---------------------------------------------------------------- コマンド実装
+
+def cmd_init(args: argparse.Namespace) -> int:
+    path = Path(args.output)
+    if path.exists() and not args.force:
+        print(f"既に存在します: {path} (上書きするには --force)")
+        return 1
+    path.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+    print(f"設定ファイルを作成しました: {path}")
+    print("次は `ttradar doctor` で環境を確認してください。")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """環境診断. ネットワーク制限のある環境で何が使えるかを切り分ける."""
+    cfg = Config.load(args.config)
+    print("=== ttradar doctor ===\n")
+
+    print(f"[設定] DB: {cfg.db_path} / 対象国: {', '.join(cfg.regions)}")
+    print(f"       収集元: {', '.join(cfg.sources)}")
+    print(f"       通知: {', '.join(cfg.notify_channels) or '(なし)'}\n")
+
+    print("[依存ライブラリ]")
+    for mod, why in [("requests", "必須"), ("yaml", "必須"), ("jinja2", "HTMLレポート"),
+                     ("rich", "見やすい表示"), ("playwright", "ブラウザ収集"),
+                     ("yt_dlp", "クリエイター定点観測")]:
+        try:
+            __import__(mod)
+            print(f"  OK   {mod:<12} ({why})")
+        except ImportError:
+            print(f"  なし {mod:<12} ({why})")
+
+    print("\n[収集元]")
+    from .collectors.base import all_collectors
+    for name, cls in sorted(all_collectors().items()):
+        try:
+            inst = cls(cfg)
+        except TypeError:
+            with _db(cfg) as d:
+                inst = cls(cfg, db=d)
+        ok, why = inst.available()
+        mark = "OK  " if ok else "不可"
+        print(f"  {mark} {name:<26} {why}")
+        if cls.requires:
+            print(f"       必要: {cls.requires}")
+
+    print("\n[TikTok への到達性]")
+    from .util.http import BlockedError, HttpClient
+    client = HttpClient(min_interval=0.2, timeout=15, retries=1)
+    reachable = True
+    for label, url in [
+        ("Creative Center", "https://ads.tiktok.com/business/creativecenter/"),
+        ("TikTok 本体", "https://www.tiktok.com/"),
+    ]:
+        try:
+            client.get_text(url)
+            print(f"  OK   {label}")
+        except BlockedError as e:
+            reachable = False
+            print(f"  不可 {label} — {str(e)[:100]}")
+        except Exception as e:
+            reachable = False
+            print(f"  不可 {label} — {type(e).__name__}: {str(e)[:80]}")
+    client.close()
+
+    if not reachable:
+        print("\n  ⚠ TikTok に到達できません。以下のいずれかです:")
+        print("     - 実行環境のネットワークポリシーでブロックされている")
+        print("     - 社内プロキシ / ファイアウォールの制限")
+        print("     - TikTok 側の一時的な制限")
+        print("     手元の PC で実行するか、`ttradar demo` でオフライン検証してください。")
+
+    with _db(cfg) as db:
+        print(f"\n[データベース] エンティティ {db.entity_count()} 件 / "
+              f"スナップショット {db.snapshot_count()} 件")
+        times = db.distinct_capture_times(5)
+        if times:
+            import datetime as _dt
+            print("  直近の収集: " + ", ".join(
+                _dt.datetime.fromtimestamp(t).strftime("%m/%d %H:%M") for t in times))
+        else:
+            print("  まだデータがありません。`ttradar collect` を実行してください。")
+    return 0 if reachable else 2
+
+
+def cmd_collect(args: argparse.Namespace) -> int:
+    cfg = Config.load(args.config)
+    sources = args.source or None
+    with _db(cfg) as db:
+        from .analysis.digest import Radar
+        radar = Radar(cfg, db)
+        res = radar.collect(sources=sources, regions=args.region or None)
+
+    print(f"\n収集 {res.collected} 件 / 新規保存 {res.inserted} 件 "
+          f"({res.duration:.1f}秒)")
+    for src, n in sorted(res.by_source.items(), key=lambda x: -x[1]):
+        print(f"  {src:<28} {n:>5} 件")
+    if res.errors:
+        print("\n[エラー]")
+        for e in res.errors:
+            print(f"  - {e}")
+    if res.inserted == 0 and res.errors:
+        print("\n何も取得できませんでした。`ttradar doctor` で原因を確認してください。")
+        return 1
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    cfg = Config.load(args.config)
+    with _db(cfg) as db:
+        from .analysis.digest import Radar
+        from .report import console
+        radar = Radar(cfg, db)
+        digest = radar.analyze(region=args.region, window_hours=args.window)
+
+        if args.type:
+            wanted = {EntityType(t) for t in args.type}
+            digest.by_type = {k: v for k, v in digest.by_type.items() if k in wanted}
+
+        if args.json:
+            import json
+            print(json.dumps([s.to_dict() for s in digest.all_signals()],
+                             ensure_ascii=False, indent=2, default=str))
+        else:
+            console.render(digest, top_n=args.top or cfg.top_n)
+
+        if args.html:
+            from .report.html import write_report
+            path = write_report(digest, cfg.report_dir, top_n=args.top or cfg.top_n,
+                                sources=", ".join(cfg.sources))
+            print(f"HTML レポート: {path}")
+            print(f"最新版:        {Path(cfg.report_dir) / 'latest.html'}")
+        db.record_signals(digest.all_signals())
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """定期実行用: 収集 -> 分析 -> レポート -> 通知 を一気通貫で."""
+    cfg = Config.load(args.config)
+    with _db(cfg) as db:
+        from .analysis.digest import Radar
+        from .notify import dispatch
+        from .report import console
+        from .report.html import write_report
+
+        radar = Radar(cfg, db)
+        res = radar.collect(sources=args.source or None)
+        print(f"収集 {res.collected} 件 / 新規 {res.inserted} 件")
+        for e in res.errors:
+            log.warning(e)
+
+        digest = radar.analyze(region=args.region)
+        console.render(digest, top_n=cfg.top_n)
+        db.record_signals(digest.all_signals())
+
+        path = write_report(digest, cfg.report_dir, top_n=cfg.top_n,
+                            sources=", ".join(cfg.sources))
+        print(f"HTML レポート: {path}")
+
+        channels = cfg.enabled_notifiers()
+        if not channels:
+            print("通知チャンネルが未設定のため通知はスキップしました。")
+            return 0
+
+        for channel in channels:
+            fresh = radar.new_alerts(digest, channel)
+            console.render_alerts(fresh, cfg.alert_threshold)
+            if not fresh:
+                continue
+            from .notify import get_notifier
+            fn = get_notifier(channel)
+            if fn and fn(cfg, fresh, "TikTok トレンド速報"):
+                radar.mark_alerts_sent(fresh, channel)
+                print(f"{channel} に {len(fresh)} 件通知しました。")
+            else:
+                print(f"{channel} への通知に失敗しました。")
+    return 0
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    cfg = Config.load(args.config)
+    with _db(cfg) as db:
+        if args.action == "add":
+            if not args.value:
+                print("追加する値を指定してください (例: ttradar watch add creator @user)")
+                return 1
+            db.add_watch(args.kind, args.value, args.note)
+            print(f"追加しました: [{args.kind}] {args.value}")
+        elif args.action == "remove":
+            db.remove_watch(args.kind, args.value or "")
+            print(f"削除しました: [{args.kind}] {args.value}")
+        else:
+            rows = db.list_watch(args.kind if args.kind != "all" else None)
+            if not rows:
+                print("追跡リストは空です。")
+                print("例: ttradar watch add creator @competitor_handle")
+                return 0
+            print(f"{'種別':<10} {'値':<30} メモ")
+            for r in rows:
+                print(f"{r['kind']:<10} {r['value']:<30} {r['note'] or ''}")
+    return 0
+
+
+def cmd_demo(args: argparse.Namespace) -> int:
+    """オフラインのサンプルデータで一通りの流れを体験する."""
+    cfg = Config.load(args.config)
+    cfg.sources = ["demo"]
+    if args.db:
+        cfg.db_path = args.db
+    with _db(cfg) as db:
+        from .analysis.digest import Radar
+        from .collectors.demo import DemoCollector
+        from .report import console
+        from .report.html import write_report
+
+        print(f"{args.days} 日分のサンプル履歴を生成中…")
+        for off in range(args.days, -1, -1):
+            snaps = DemoCollector(cfg, day_offset=float(off)).collect("JP")
+            db.upsert_snapshots(snaps)
+        print(f"エンティティ {db.entity_count()} 件 / スナップショット {db.snapshot_count()} 件\n")
+
+        radar = Radar(cfg, db)
+        digest = radar.analyze(region="JP", window_hours=args.window)
+        console.render(digest, top_n=args.top)
+        path = write_report(digest, cfg.report_dir, top_n=args.top, sources="demo")
+        print(f"HTML レポート: {path}")
+        print("\n※ これはサンプルデータです。実データは `ttradar collect` で取得します。")
+    return 0
+
+
+def cmd_sources(args: argparse.Namespace) -> int:
+    cfg = Config.load(args.config)
+    from .collectors.base import all_collectors
+    print(f"{'名前':<28} {'取得できる種別':<48} 必要なもの")
+    print("-" * 110)
+    for name, cls in sorted(all_collectors().items()):
+        types = ", ".join(e.value for e in cls.provides)
+        print(f"{name:<28} {types:<48} {cls.requires}")
+    return 0
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    cfg = Config.load(args.config)
+    with _db(cfg) as db:
+        before = db.snapshot_count()
+        deleted = db.prune(keep_days=args.keep_days or cfg.keep_days)
+        print(f"{deleted} 件のスナップショットを削除しました "
+              f"({before} -> {db.snapshot_count()})")
+    return 0
+
+
+# ------------------------------------------------------------------ パーサー
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="ttradar",
+        description="TikTok の伸びている商品・トレンドを継続的に監視するツール",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "よくある使い方:\n"
+            "  ttradar init                   設定ファイルを作る\n"
+            "  ttradar doctor                 環境を診断する\n"
+            "  ttradar demo                   オフラインで動作を体験する\n"
+            "  ttradar run                    収集〜通知まで一括 (cron 向け)\n"
+            "  ttradar report --html          最新の分析を HTML で出力\n"
+        ),
+    )
+    p.add_argument("--config", "-c", help="設定ファイルのパス")
+    p.add_argument("--verbose", "-v", action="store_true", help="詳細ログ")
+    p.add_argument("--version", action="version", version=f"ttradar {__version__}")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    s = sub.add_parser("init", help="設定ファイルを生成する")
+    s.add_argument("--output", "-o", default="config.yaml")
+    s.add_argument("--force", "-f", action="store_true")
+    s.set_defaults(func=cmd_init)
+
+    s = sub.add_parser("doctor", help="環境と到達性を診断する")
+    s.set_defaults(func=cmd_doctor)
+
+    s = sub.add_parser("collect", help="トレンドを収集して保存する")
+    s.add_argument("--source", "-s", action="append", help="使う収集元 (複数可)")
+    s.add_argument("--region", "-r", action="append", help="対象国 (複数可)")
+    s.set_defaults(func=cmd_collect)
+
+    s = sub.add_parser("report", help="分析結果を表示する")
+    s.add_argument("--region", "-r", help="対象国")
+    s.add_argument("--window", "-w", type=float, help="比較窓 (時間)")
+    s.add_argument("--top", "-n", type=int, help="表示件数")
+    s.add_argument("--type", "-t", action="append",
+                   choices=[e.value for e in EntityType], help="種別で絞る")
+    s.add_argument("--html", action="store_true", help="HTML レポートも出力")
+    s.add_argument("--json", action="store_true", help="JSON で出力")
+    s.set_defaults(func=cmd_report)
+
+    s = sub.add_parser("run", help="収集〜通知まで一括実行 (定期実行向け)")
+    s.add_argument("--source", "-s", action="append")
+    s.add_argument("--region", "-r")
+    s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("watch", help="追跡リストを管理する")
+    s.add_argument("action", choices=["add", "remove", "list"], nargs="?", default="list")
+    s.add_argument("kind", nargs="?", default="all",
+                   choices=["creator", "keyword", "product", "hashtag", "all"])
+    s.add_argument("value", nargs="?")
+    s.add_argument("--note")
+    s.set_defaults(func=cmd_watch)
+
+    s = sub.add_parser("demo", help="オフラインのサンプルデータで体験する")
+    s.add_argument("--days", type=int, default=7, help="生成する履歴の日数")
+    s.add_argument("--window", type=float, default=72.0, help="比較窓 (時間)")
+    s.add_argument("--top", type=int, default=10)
+    s.add_argument("--db", help="使用する DB パス (既定の DB を汚したくない場合)")
+    s.set_defaults(func=cmd_demo)
+
+    s = sub.add_parser("sources", help="利用可能な収集元を一覧する")
+    s.set_defaults(func=cmd_sources)
+
+    s = sub.add_parser("prune", help="古いデータを削除する")
+    s.add_argument("--keep-days", type=int)
+    s.set_defaults(func=cmd_prune)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    setup(verbose=getattr(args, "verbose", False))
+    try:
+        return int(args.func(args) or 0)
+    except KeyboardInterrupt:
+        print("\n中断しました。")
+        return 130
+    except FileNotFoundError as e:
+        print(f"エラー: {e}")
+        return 1
+    except Exception as e:  # noqa: BLE001
+        log.exception("予期しないエラー")
+        print(f"\nエラー: {type(e).__name__}: {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
