@@ -4,10 +4,10 @@ data/
 *.db-wal
 *.db-shm
 
-# 生成物
+# 生成物 (レポートの出力先。テンプレートは追跡対象なので除外しない)
 reports/
-*.html
-!ttradar/report/templates/*.html.j2
+/*.html
+!ttradar/report/templates/
 
 # 秘密情報
 .env

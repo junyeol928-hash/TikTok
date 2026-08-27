@@ -1,4 +1,4 @@
-.PHONY: help install install-all demo doctor collect report run test clean
+.PHONY: help install install-all app demo doctor collect report run test clean
 
 help:
 	@echo "ttradar — TikTok トレンド監視"
@@ -6,6 +6,7 @@ help:
 	@echo "  make install      コア依存をインストール"
 	@echo "  make install-all  ブラウザ収集・yt-dlp も含めて全部入れる"
 	@echo "  make doctor       環境と到達性を診断"
+	@echo "  make app          ブラウザでダッシュボードを開く"
 	@echo "  make demo         オフラインのサンプルで動作確認"
 	@echo "  make collect      トレンドを収集"
 	@echo "  make report       分析して HTML 出力"
@@ -23,6 +24,9 @@ install-all: install
 
 doctor:
 	.venv/bin/ttradar doctor
+
+app:
+	.venv/bin/ttradar serve
 
 demo:
 	.venv/bin/ttradar demo

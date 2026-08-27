@@ -32,7 +32,7 @@ ttradar = "ttradar.cli:main"
 include = ["ttradar*"]
 
 [tool.setuptools.package-data]
-ttradar = ["report/templates/*.j2"]
+ttradar = ["report/templates/*.j2", "report/templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -5,6 +5,7 @@
     ttradar collect         トレンドを収集して DB に保存
     ttradar report          分析してランキング表示 / HTML 出力
     ttradar run             collect + report + notify (定期実行はこれ)
+    ttradar serve           ブラウザで見るダッシュボードアプリを起動
     ttradar watch           追跡リスト (競合クリエイター等) の管理
     ttradar demo            オフラインのサンプルデータで一通り体験する
     ttradar sources         利用可能な収集元を一覧
@@ -287,6 +288,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """ローカル Web アプリを起動する."""
+    cfg = Config.load(args.config)
+    from .server import serve
+
+    with _db(cfg) as db:
+        n = db.entity_count()
+    if n == 0:
+        print("※ DB が空です。アプリの「収集する」ボタン、または別ターミナルで")
+        print("   `ttradar collect` を実行してください。")
+        print("   オフラインで見た目を確認するなら `ttradar demo` が先です。\n")
+
+    serve(cfg, host=args.host, port=args.port, open_browser=not args.no_browser)
+    return 0
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     cfg = Config.load(args.config)
     with _db(cfg) as db:
@@ -371,6 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  ttradar init                   設定ファイルを作る\n"
             "  ttradar doctor                 環境を診断する\n"
             "  ttradar demo                   オフラインで動作を体験する\n"
+            "  ttradar serve                  ブラウザでダッシュボードを開く\n"
             "  ttradar run                    収集〜通知まで一括 (cron 向け)\n"
             "  ttradar report --html          最新の分析を HTML で出力\n"
         ),
@@ -407,6 +425,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--source", "-s", action="append")
     s.add_argument("--region", "-r")
     s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("serve", help="ブラウザで見るダッシュボードを起動する")
+    s.add_argument("--port", "-p", type=int, default=8765)
+    s.add_argument("--host", default="127.0.0.1",
+                   help="既定は 127.0.0.1 (自分の PC のみ). 0.0.0.0 は同一 LAN に公開されるので注意")
+    s.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
+    s.set_defaults(func=cmd_serve)
 
     s = sub.add_parser("watch", help="追跡リストを管理する")
     s.add_argument("action", choices=["add", "remove", "list"], nargs="?", default="list")
