@@ -119,7 +119,10 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 7 日分のサンプル履歴を生成して、収集 → 分析 → ランキング → HTML レポートまで
 一通り動かします。実際にどんな出力が出るのかがすぐ分かります。
 
-### アプリを開く（推奨: 自動収集つき）
+### アプリを開く
+
+**Windows は `start.bat`、Mac は `start.command` をダブルクリック**するだけです。
+以下はコマンドで操作する場合。
 
 ```bash
 .venv/bin/ttradar serve --interval 120 --collect-now          # Mac / Linux

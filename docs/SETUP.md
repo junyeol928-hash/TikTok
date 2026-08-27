@@ -55,11 +55,17 @@ bash setup.sh
 
 ### 4. アプリを開く
 
+**`start.command` をダブルクリック**するだけです。
+ブラウザが自動で開きます。止めるときは `Control` + `C`。
+
+> 初回は「開発元が未確認」と出ることがあります。
+> その場合は右クリック →「開く」→「開く」を選んでください。
+
+コマンドで開きたい場合はこちら:
+
 ```bash
 .venv/bin/ttradar serve --interval 120 --collect-now
 ```
-
-ブラウザが自動で開きます。止めるときはターミナルで `Control` + `C`。
 
 ---
 
@@ -99,34 +105,34 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 
 ### 4. アプリを開く
 
+**`start.bat` をダブルクリック**するだけです。
+ブラウザが自動で開きます。止めるときは黒いウィンドウで `Ctrl` + `C`。
+
+コマンドで開きたい場合はこちら:
+
 ```powershell
 .\.venv\Scripts\ttradar.exe serve --interval 120 --collect-now
 ```
-
-止めるときは `Ctrl` + `C`。
 
 ---
 
 ## 2 回目以降
 
-セットアップは最初の 1 回だけです。次からはアプリを開くコマンドだけ。
+セットアップは最初の 1 回だけです。次からは **ダブルクリックするだけ**。
 
-**Mac**
-```bash
-cd ~/ttradar
-.venv/bin/ttradar serve --interval 120 --collect-now
-```
+| やりたいこと | Windows | Mac |
+|---|---|---|
+| アプリを開く | `start.bat` | `start.command` |
+| 最新版に更新する | `update.bat` | ターミナルで `cd` してから `git pull` |
+| もう一度セットアップ | `setup.bat` | ターミナルで `bash setup.sh` |
 
-**Windows**
-```powershell
-cd $HOME\ttradar
-.\.venv\Scripts\ttradar.exe serve --interval 120 --collect-now
-```
+タスクバーやDockに登録しておくと、次からは 1 クリックで開けます。
 
-毎回打つのが面倒なら、この 2 行を書いたファイルを作っておくと
-ダブルクリックで起動できます（Mac は `start.command`、Windows は `start.bat`）。
-
----
+> **コマンドで操作する場合の注意**
+> PowerShell やターミナルを新しく開くと、必ずユーザーフォルダから始まります。
+> `git pull` などはプロジェクトのフォルダの中で実行する必要があるので、
+> **最初に `cd ttradar` を実行してください。**
+> これを忘れると `not a git repository` と言われます（壊れてはいません）。
 
 ## 診断結果の読み方
 
@@ -167,6 +173,7 @@ TikTok に接続できていません。よくある原因は次の通りです�
 | `このシステムではスクリプトの実行が無効` (Windows) | `powershell -ExecutionPolicy Bypass -File setup.ps1` の形で実行する |
 | インストールが途中で止まる | ネットワークを確認し、もう一度 `bash setup.sh` を実行（何度実行しても安全です） |
 | `.venv が壊れています` | `.venv` フォルダを削除してからもう一度セットアップ |
+| `not a git repository` | フォルダの外にいます。`cd ttradar` してから実行 |
 | `'if' を使用できません` など大量の構文エラー (Windows) | スクリプトが古い可能性。`git pull` してからやり直す |
 | 文字が `縺九ｉ` のように化ける (Windows) | 同上。`git pull` で最新版を取得してください |
 | 数字が全部 `—` になる | 履歴不足。`--interval` を付けたまま数時間そのままにしておく |

@@ -10,6 +10,8 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PS1 = ROOT / "setup.ps1"
 SH = ROOT / "setup.sh"
+BATS = [ROOT / n for n in ("setup.bat", "start.bat", "update.bat")]
+COMMAND = ROOT / "start.command"
 
 
 def test_ps1_has_utf8_bom():
@@ -77,3 +79,56 @@ def test_gitattributes_pins_script_encoding():
 @pytest.mark.parametrize("path", [PS1, SH])
 def test_scripts_are_not_empty(path):
     assert path.exists() and len(path.read_bytes()) > 500
+
+
+# ------------------------------------------------------- ダブルクリック用の起動ファイル
+
+@pytest.mark.parametrize("bat", BATS, ids=lambda p: p.name)
+def test_bat_is_cp932(bat):
+    """.bat は CP932 で保存されていること.
+
+    日本語 Windows の cmd.exe は .bat を CP932 (ANSI) として読む。
+    UTF-8 で保存すると日本語が文字化けし、setup.ps1 で起きたのと
+    同じ問題が cmd 側でも発生する。
+    """
+    raw = bat.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf"), f"{bat.name} に UTF-8 BOM があります"
+    try:
+        text = raw.decode("cp932")
+    except UnicodeDecodeError as e:
+        pytest.fail(f"{bat.name} は CP932 として読めません: {e}")
+    assert "ttradar" in text
+
+
+@pytest.mark.parametrize("bat", BATS, ids=lambda p: p.name)
+def test_bat_uses_crlf(bat):
+    raw = bat.read_bytes()
+    assert raw.count(b"\n") - raw.count(b"\r\n") == 0, f"{bat.name} に単独 LF があります"
+
+
+@pytest.mark.parametrize("bat", BATS, ids=lambda p: p.name)
+def test_bat_moves_to_own_directory(bat):
+    """どこから起動されても自分の場所へ移動すること.
+
+    ダブルクリック時のカレントディレクトリは起動元に依存するため、
+    cd /d "%~dp0" が無いとファイルを見つけられない。
+    """
+    text = bat.read_bytes().decode("cp932")
+    assert 'cd /d "%~dp0"' in text, f"{bat.name} に cd /d \"%~dp0\" がありません"
+
+
+def test_command_file_is_utf8_lf_and_cds():
+    """Mac の .command は UTF-8 / LF で、自分の場所へ移動すること."""
+    raw = COMMAND.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    assert raw.count(b"\r\n") == 0
+    text = raw.decode("utf-8")
+    assert text.startswith("#!")
+    assert 'cd "$(dirname "$0")"' in text
+
+
+def test_launchers_are_executable():
+    """Mac 側は実行権限が無いとダブルクリックできない."""
+    import os
+    for p in (COMMAND, SH):
+        assert os.access(p, os.X_OK), f"{p.name} に実行権限がありません"

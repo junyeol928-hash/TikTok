@@ -4,3 +4,10 @@
 
 # シェルスクリプトは LF のまま (CRLF だと bash が実行できない)
 *.sh text eol=lf
+
+# .bat は日本語 Windows の cmd が CP932 で読む。
+# 文字コードは git では変換されないが、改行は CRLF に固定する。
+*.bat text eol=crlf
+
+# Finder からダブルクリックする起動用スクリプト
+*.command text eol=lf
