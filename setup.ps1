@@ -26,13 +26,23 @@ Write-Host "TikTok 商品紹介トレンドレーダー" -ForegroundColor DarkGr
 Step "Python を確認しています"
 
 # バージョンを "3.12" の形で返す。実際に動かして確かめる。
-$verProbe = 'import sys; print("%d.%d" % sys.version_info[:2])'
+#
+# ここで -c にコードを渡してはいけない。
+# Windows PowerShell 5.1 はネイティブコマンドへ引数を渡す際に
+# 文字列内の二重引用符を落としてしまうため、
+#   import sys; print("%d.%d" % sys.version_info[:2])
+# が Python 側では
+#   import sys; print(%d.%d % sys.version_info[:2])
+# となって SyntaxError で落ちる。
+# その結果、正常にインストールされている Python まで
+# 「動作せず」と誤判定していた (実機で発生)。
+# --version なら引数が 1 語だけで引用符も不要なので、この問題を回避できる。
 function Get-PyVersion($exe, $exeArgs) {
     try {
-        $out = & $exe @exeArgs -c $verProbe 2>&1
+        $out = & $exe @exeArgs --version 2>&1
         if ($LASTEXITCODE -ne 0) { return $null }
         $t = ($out | Out-String).Trim()
-        if ($t -match '(\d+)\.(\d+)') { return "$($Matches[1]).$($Matches[2])" }
+        if ($t -match 'Python\s+(\d+)\.(\d+)') { return "$($Matches[1]).$($Matches[2])" }
         return $null
     } catch { return $null }
 }

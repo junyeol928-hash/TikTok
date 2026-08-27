@@ -132,3 +132,32 @@ def test_launchers_are_executable():
     import os
     for p in (COMMAND, SH):
         assert os.access(p, os.X_OK), f"{p.name} に実行権限がありません"
+
+
+def test_ps1_does_not_pass_quoted_code_to_native_command():
+    """ネイティブコマンドへ二重引用符を含む文字列を渡さないこと.
+
+    Windows PowerShell 5.1 は native コマンドへの引数から
+    文字列内の二重引用符を落とす。そのため
+
+        python -c 'import sys; print("%d.%d" % sys.version_info[:2])'
+
+    は Python 側で print(%d.%d % ...) となり SyntaxError で落ちる。
+    実機では、正常にインストールされている Python 3.14 まで
+    「動作せず」と誤判定された。
+    バージョン取得は --version を使い、コードを渡さない。
+    """
+    text = PS1.read_text(encoding="utf-8-sig")
+    assert "--version" in text, "バージョン取得に --version を使っていません"
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if "-c " not in stripped:
+            continue
+        # native コマンド呼び出し行に限って検査する
+        if "&" not in stripped:
+            continue
+        assert '\\"' not in stripped and '"' not in stripped.split("-c ", 1)[1][:60], (
+            f"native コマンドへ引用符付きコードを渡しています: {stripped}"
+        )
