@@ -25,7 +25,7 @@ Write-Host "TikTok 商品紹介トレンドレーダー" -ForegroundColor DarkGr
 # ------------------------------------------------------------------ Python
 Step "Python を確認しています"
 
-# バージョンを "3.12" の形で返す。取れなければ $null。
+# バージョンを "3.12" の形で返す。実際に動かして確かめる。
 $verProbe = 'import sys; print("%d.%d" % sys.version_info[:2])'
 function Get-PyVersion($exe, $exeArgs) {
     try {
@@ -37,38 +37,61 @@ function Get-PyVersion($exe, $exeArgs) {
     } catch { return $null }
 }
 
-# Microsoft Store のダミー (App Execution Alias) を見分ける。
-# PATH には載っているが Python 本体ではなく、実行すると Store が開くだけ。
-function Test-StoreStub($path) {
-    if (-not $path) { return $false }
-    if ($path -notlike "*WindowsApps*") { return $false }
-    try { return ((Get-Item $path -ErrorAction Stop).Length -eq 0) } catch { return $true }
-}
+$found = @()      # 実際に動いた Python
+$probed = @()     # 試した場所と結果 (原因調査用にすべて記録する)
+$sawStoreAlias = $false
 
-$found = @()          # 見つかった Python 全部 (古いものも含む)
-$storeStub = $false
-
-# 1) py ランチャー (公式インストーラが入れる。PATH が通っていなくても使える)
-if (Get-Command py -ErrorAction SilentlyContinue) {
-    foreach ($v in @("-3.14","-3.13","-3.12","-3.11","-3.10","-3")) {
-        $ver = Get-PyVersion "py" @($v)
-        if ($ver) { $found += [pscustomobject]@{ Exe="py"; PyArgs=@($v); Ver=$ver; From="py $v" } }
+function Try-Python($exe, $exeArgs, $label) {
+    if ($script:found | Where-Object { $_.Exe -eq $exe -and (($_.PyArgs -join " ") -eq ($exeArgs -join " ")) }) { return }
+    $ver = Get-PyVersion $exe $exeArgs
+    $script:probed += [pscustomobject]@{ Label=$label; Ver=$ver }
+    if ($ver) {
+        $script:found += [pscustomobject]@{ Exe=$exe; PyArgs=$exeArgs; Ver=$ver; From=$label }
     }
 }
 
-# 2) PATH 上の python / python3 (Store のダミーは除外)
+# 1) レジストリ: Windows で「どの Python が入っているか」の最も確実な情報源。
+#    PATH を通していなくても、インストーラが必ずここに書く。
+foreach ($root in @("HKLM:\SOFTWARE\Python\PythonCore",
+                    "HKCU:\SOFTWARE\Python\PythonCore",
+                    "HKLM:\SOFTWARE\WOW6432Node\Python\PythonCore")) {
+    foreach ($key in (Get-ChildItem $root -ErrorAction SilentlyContinue)) {
+        $ip = (Get-ItemProperty "$($key.PSPath)\InstallPath" -ErrorAction SilentlyContinue)
+        if (-not $ip) { continue }
+        $dir = $ip.'(default)'
+        if (-not $dir) { continue }
+        $exe = Join-Path $dir "python.exe"
+        if (Test-Path $exe) { Try-Python $exe @() $exe }
+    }
+}
+
+# 2) py ランチャー。-0p で導入済みの Python を一覧できる。
+if (Get-Command py -ErrorAction SilentlyContinue) {
+    try {
+        $list = & py -0p 2>&1
+        foreach ($line in ($list -split "`n")) {
+            if ($line -match '([A-Za-z]:\\[^\r\n]*python\.exe)') {
+                Try-Python $Matches[1].Trim() @() $Matches[1].Trim()
+            }
+        }
+    } catch { }
+    foreach ($v in @("-3.14","-3.13","-3.12","-3.11","-3.10","-3")) {
+        Try-Python "py" @($v) "py $v"
+    }
+}
+
+# 3) PATH 上の python / python3。
+#    Microsoft Store のショートカットかどうかを見た目で判断せず、
+#    まず実行してみる。Store 版が正しく入っていれば動くため、
+#    パスだけで弾くと入っているのに「無い」と誤判定する。
 foreach ($name in @("python","python3")) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if (-not $cmd) { continue }
-    $src = $cmd.Source
-    if (Test-StoreStub $src) { $storeStub = $true; continue }
-    $ver = Get-PyVersion $src @()
-    if ($ver) { $found += [pscustomobject]@{ Exe=$src; PyArgs=@(); Ver=$ver; From=$name } }
+    if ($cmd.Source -like "*WindowsApps*") { $sawStoreAlias = $true }
+    Try-Python $cmd.Source @() $cmd.Source
 }
 
-# 3) よくあるインストール先を直接探す
-#    「Add python.exe to PATH」を外してインストールした場合、
-#    Python は入っているのに PATH からは見えない。これが最も多い。
+# 4) よくあるインストール先を直接走査
 $globs = @(
     "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe",
     "$env:ProgramFiles\Python3*\python.exe",
@@ -79,13 +102,11 @@ $globs = @(
 foreach ($g in $globs) {
     if (-not $g) { continue }
     foreach ($hit in (Get-ChildItem $g -ErrorAction SilentlyContinue)) {
-        if ($found | Where-Object { $_.Exe -eq $hit.FullName }) { continue }
-        $ver = Get-PyVersion $hit.FullName @()
-        if ($ver) { $found += [pscustomobject]@{ Exe=$hit.FullName; PyArgs=@(); Ver=$ver; From=$hit.FullName } }
+        Try-Python $hit.FullName @() $hit.FullName
     }
 }
 
-# 3.10 以上のうち最も新しいものを選ぶ
+# 3.10 以上のうち最も新しいものを採用
 $usable = $found | Where-Object {
     $p = $_.Ver.Split(".")
     ([int]$p[0] -gt 3) -or ([int]$p[0] -eq 3 -and [int]$p[1] -ge 10)
@@ -95,57 +116,57 @@ if ($usable.Count -gt 0) {
     $py = $usable[0].Exe
     $pyArgs = $usable[0].PyArgs
     Ok "Python $($usable[0].Ver) を使用します"
-    if ($usable[0].From -like "*\*") { Write-Host "      $($usable[0].From)" -ForegroundColor DarkGray }
+    Write-Host "      $($usable[0].From)" -ForegroundColor DarkGray
 } else {
     Write-Host ""
-    if ($found.Count -gt 0) {
-        Warn "見つかった Python (いずれも 3.10 未満):"
-        foreach ($f in $found) { Write-Host "        $($f.Ver)  $($f.From)" -ForegroundColor DarkGray }
+    if ($probed.Count -gt 0) {
+        Write-Host "  調べた場所:" -ForegroundColor DarkGray
+        foreach ($pr in $probed) {
+            $r = if ($pr.Ver) { "Python $($pr.Ver)" } else { "動作せず" }
+            Write-Host "        $r  <-  $($pr.Label)" -ForegroundColor DarkGray
+        }
         Write-Host ""
+    }
+    if ($found.Count -gt 0) {
         Die @"
-Python 3.10 以上が必要です。
+Python 3.10 以上が必要です (見つかったのは古い版だけでした)。
 
   https://www.python.org/downloads/ から新しい版を入れてください。
   インストール時に「Add python.exe to PATH」にチェックを入れます。
-  古い版はそのまま残しておいて構いません。
-
-  入れ終わったら PowerShell を閉じて開き直し、もう一度実行してください。
-"@
-    }
-    if ($storeStub) {
-        Die @"
-Python がインストールされていません。
-
-  PATH にある python は Microsoft Store のショートカットで、
-  Python 本体ではありません (実行すると Store が開くだけです)。
-
-  次のどちらかで入れてください。
-
-  A) 公式サイト (おすすめ)
-     1. https://www.python.org/downloads/ を開く
-     2. 黄色い「Download Python 3.x.x」ボタンを押す
-     3. インストーラを起動し、最初の画面の下にある
-        「Add python.exe to PATH」に必ずチェックを入れる
-     4. 「Install Now」を押す
-
-  B) Microsoft Store
-     Store で「Python 3.12」を検索してインストール
+  古い版は残しておいて構いません。
 
   入れ終わったら PowerShell を閉じて開き直し、
-  もう一度このスクリプトを実行してください。
+  cd ttradar してからもう一度実行してください。
+"@
+    }
+    $hint = ""
+    if ($sawStoreAlias) {
+        $hint = @"
+
+  ※ PATH にある python は Microsoft Store のショートカットです。
+     Python 本体ではないので、これだけでは動きません。
+
 "@
     }
     Die @"
-Python が見つかりません。
+Python がインストールされていません。$hint
+  インストール手順:
 
   1. https://www.python.org/downloads/ を開く
   2. 黄色い「Download Python 3.x.x」ボタンを押す
-  3. インストーラを起動し、最初の画面の下にある
-     「Add python.exe to PATH」に必ずチェックを入れる
-  4. 「Install Now」を押す
+  3. ダウンロードした .exe を実行する
+  4. 最初の画面の一番下にある
+     「Add python.exe to PATH」に必ずチェックを入れる  ← 重要
+  5. 「Install Now」を押し、完了するまで待つ
+     (「Setup was successful」と出れば成功)
+
+  よくある失敗:
+    - Store のページが開いただけで、実際には入れていない
+    - インストーラを起動したが「Install Now」を押していない
+    - 手順 4 のチェックを入れ忘れた
 
   入れ終わったら PowerShell を閉じて開き直し、
-  もう一度このスクリプトを実行してください。
+  cd ttradar してからもう一度実行してください。
 "@
 }
 
