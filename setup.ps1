@@ -24,34 +24,130 @@ Write-Host "TikTok 商品紹介トレンドレーダー" -ForegroundColor DarkGr
 
 # ------------------------------------------------------------------ Python
 Step "Python を確認しています"
-# Python 側のコードは ASCII のみ。単一引用符なので PowerShell は展開しない。
-$verCheck = 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
-$py = $null
-foreach ($cand in @("py -3.13", "py -3.12", "py -3.11", "py -3.10", "py -3", "python")) {
-    # $args は PowerShell の自動変数なので代入してはいけない ($cmdArgs を使う)
-    $parts = $cand.Split(" ")
-    $exe = $parts[0]
-    $cmdArgs = if ($parts.Count -gt 1) { $parts[1..($parts.Count-1)] } else { @() }
-    if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
-    # 標準出力を拾わず終了コードだけで判定する (引用符の入れ子を減らすため)
+
+# バージョンを "3.12" の形で返す。取れなければ $null。
+$verProbe = 'import sys; print("%d.%d" % sys.version_info[:2])'
+function Get-PyVersion($exe, $exeArgs) {
     try {
-        & $exe @cmdArgs -c $verCheck | Out-Null
-        if ($LASTEXITCODE -eq 0) { $py = $exe; $pyArgs = $cmdArgs; break }
-    } catch { }
+        $out = & $exe @exeArgs -c $verProbe 2>&1
+        if ($LASTEXITCODE -ne 0) { return $null }
+        $t = ($out | Out-String).Trim()
+        if ($t -match '(\d+)\.(\d+)') { return "$($Matches[1]).$($Matches[2])" }
+        return $null
+    } catch { return $null }
 }
-if (-not $py) {
+
+# Microsoft Store のダミー (App Execution Alias) を見分ける。
+# PATH には載っているが Python 本体ではなく、実行すると Store が開くだけ。
+function Test-StoreStub($path) {
+    if (-not $path) { return $false }
+    if ($path -notlike "*WindowsApps*") { return $false }
+    try { return ((Get-Item $path -ErrorAction Stop).Length -eq 0) } catch { return $true }
+}
+
+$found = @()          # 見つかった Python 全部 (古いものも含む)
+$storeStub = $false
+
+# 1) py ランチャー (公式インストーラが入れる。PATH が通っていなくても使える)
+if (Get-Command py -ErrorAction SilentlyContinue) {
+    foreach ($v in @("-3.14","-3.13","-3.12","-3.11","-3.10","-3")) {
+        $ver = Get-PyVersion "py" @($v)
+        if ($ver) { $found += [pscustomobject]@{ Exe="py"; PyArgs=@($v); Ver=$ver; From="py $v" } }
+    }
+}
+
+# 2) PATH 上の python / python3 (Store のダミーは除外)
+foreach ($name in @("python","python3")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if (-not $cmd) { continue }
+    $src = $cmd.Source
+    if (Test-StoreStub $src) { $storeStub = $true; continue }
+    $ver = Get-PyVersion $src @()
+    if ($ver) { $found += [pscustomobject]@{ Exe=$src; PyArgs=@(); Ver=$ver; From=$name } }
+}
+
+# 3) よくあるインストール先を直接探す
+#    「Add python.exe to PATH」を外してインストールした場合、
+#    Python は入っているのに PATH からは見えない。これが最も多い。
+$globs = @(
+    "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe",
+    "$env:ProgramFiles\Python3*\python.exe",
+    "${env:ProgramFiles(x86)}\Python3*\python.exe",
+    "$env:LOCALAPPDATA\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3*\python.exe",
+    "C:\Python3*\python.exe"
+)
+foreach ($g in $globs) {
+    if (-not $g) { continue }
+    foreach ($hit in (Get-ChildItem $g -ErrorAction SilentlyContinue)) {
+        if ($found | Where-Object { $_.Exe -eq $hit.FullName }) { continue }
+        $ver = Get-PyVersion $hit.FullName @()
+        if ($ver) { $found += [pscustomobject]@{ Exe=$hit.FullName; PyArgs=@(); Ver=$ver; From=$hit.FullName } }
+    }
+}
+
+# 3.10 以上のうち最も新しいものを選ぶ
+$usable = $found | Where-Object {
+    $p = $_.Ver.Split(".")
+    ([int]$p[0] -gt 3) -or ([int]$p[0] -eq 3 -and [int]$p[1] -ge 10)
+} | Sort-Object { [version]$_.Ver } -Descending
+
+if ($usable.Count -gt 0) {
+    $py = $usable[0].Exe
+    $pyArgs = $usable[0].PyArgs
+    Ok "Python $($usable[0].Ver) を使用します"
+    if ($usable[0].From -like "*\*") { Write-Host "      $($usable[0].From)" -ForegroundColor DarkGray }
+} else {
+    Write-Host ""
+    if ($found.Count -gt 0) {
+        Warn "見つかった Python (いずれも 3.10 未満):"
+        foreach ($f in $found) { Write-Host "        $($f.Ver)  $($f.From)" -ForegroundColor DarkGray }
+        Write-Host ""
+        Die @"
+Python 3.10 以上が必要です。
+
+  https://www.python.org/downloads/ から新しい版を入れてください。
+  インストール時に「Add python.exe to PATH」にチェックを入れます。
+  古い版はそのまま残しておいて構いません。
+
+  入れ終わったら PowerShell を閉じて開き直し、もう一度実行してください。
+"@
+    }
+    if ($storeStub) {
+        Die @"
+Python がインストールされていません。
+
+  PATH にある python は Microsoft Store のショートカットで、
+  Python 本体ではありません (実行すると Store が開くだけです)。
+
+  次のどちらかで入れてください。
+
+  A) 公式サイト (おすすめ)
+     1. https://www.python.org/downloads/ を開く
+     2. 黄色い「Download Python 3.x.x」ボタンを押す
+     3. インストーラを起動し、最初の画面の下にある
+        「Add python.exe to PATH」に必ずチェックを入れる
+     4. 「Install Now」を押す
+
+  B) Microsoft Store
+     Store で「Python 3.12」を検索してインストール
+
+  入れ終わったら PowerShell を閉じて開き直し、
+  もう一度このスクリプトを実行してください。
+"@
+    }
     Die @"
-Python 3.10 以上が見つかりません。
+Python が見つかりません。
 
-  1) https://www.python.org/downloads/ からインストーラをダウンロード
-  2) インストール時に「Add python.exe to PATH」に必ずチェックを入れる
-  3) PowerShell を開き直して、もう一度このスクリプトを実行
+  1. https://www.python.org/downloads/ を開く
+  2. 黄色い「Download Python 3.x.x」ボタンを押す
+  3. インストーラを起動し、最初の画面の下にある
+     「Add python.exe to PATH」に必ずチェックを入れる
+  4. 「Install Now」を押す
 
-  ※ Microsoft Store 版の Python でも動きます。
+  入れ終わったら PowerShell を閉じて開き直し、
+  もう一度このスクリプトを実行してください。
 "@
 }
-$ver = & $py @pyArgs --version
-Ok "$ver を使用します"
 
 # ------------------------------------------------------------------ 仮想環境
 Step "仮想環境を作成しています (.venv)"
