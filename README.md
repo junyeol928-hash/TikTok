@@ -80,24 +80,38 @@ ttradar は TikTok から**商品紹介動画そのもの**を集め、
 
 ## セットアップ
 
+**コマンドを打つのが初めての方は [docs/SETUP.md](docs/SETUP.md) を見てください。**
+画面の開き方から順に書いてあります。
+
+### Mac / Linux
+
 ```bash
-git clone https://github.com/junyeol928-hash/TikTok.git
-cd TikTok
-
-make install-all        # 仮想環境 + 依存 + Chromium を一括インストール
-# 手動でやる場合:
-#   python3 -m venv .venv
-#   .venv/bin/pip install -e ".[all]"
-#   .venv/bin/playwright install chromium
-
-.venv/bin/ttradar init      # config.yaml を生成
-.venv/bin/ttradar doctor    # 環境と TikTok への到達性を診断  ← まずこれ
+git clone https://github.com/junyeol928-hash/TikTok.git ttradar
+cd ttradar
+bash setup.sh
 ```
+
+### Windows
+
+```powershell
+git clone https://github.com/junyeol928-hash/TikTok.git ttradar
+cd ttradar
+powershell -ExecutionPolicy Bypass -File setup.ps1
+```
+
+セットアップスクリプトが、仮想環境の作成・依存のインストール・Chromium の取得・
+設定ファイルの生成・**動作診断 (`ttradar doctor`)** までを一度に行います。
+何度実行しても壊れません。
+
+最後に表示される **[TikTok への到達性]** が要点です。
+`OK` なら実データが取れます。`不可` ならネットワーク側の問題なので、
+[docs/SETUP.md の診断結果の読み方](docs/SETUP.md#診断結果の読み方) を参照してください。
 
 ### まず動作を体験する (ネットワーク不要)
 
 ```bash
-.venv/bin/ttradar demo
+.venv/bin/ttradar demo              # Mac / Linux
+.\.venv\Scripts\ttradar.exe demo   # Windows
 ```
 
 7 日分のサンプル履歴を生成して、収集 → 分析 → ランキング → HTML レポートまで
@@ -106,7 +120,8 @@ make install-all        # 仮想環境 + 依存 + Chromium を一括インスト
 ### アプリを開く（推奨: 自動収集つき）
 
 ```bash
-.venv/bin/ttradar serve --interval 120 --collect-now
+.venv/bin/ttradar serve --interval 120 --collect-now          # Mac / Linux
+.\.venv\Scripts\ttradar.exe serve --interval 120 --collect-now  # Windows
 ```
 
 - `--interval 120` … **2 時間ごとに自動で収集**します。cron を設定しなくても、
