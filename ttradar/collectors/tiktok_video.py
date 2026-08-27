@@ -270,7 +270,9 @@ class TikTokVideoCollector(Collector):
     requires = "playwright + chromium (pip install playwright && playwright install chromium)"
 
     #: ページを開いてから XHR を待つ時間 (ミリ秒)
-    settle_ms = 4500
+    #: TikTok の検索結果は描画後に遅れて item 一覧を取りに行くため、
+    #: 短いと取り逃す。実機では 4.5 秒では足りなかった。
+    settle_ms = 9000
 
     def available(self) -> tuple[bool, str]:
         try:
@@ -397,6 +399,11 @@ class TikTokVideoCollector(Collector):
             # ここが 0 だと、フィルタ以前に一覧そのものを受け取れていない。
             # 推測させないために、実際に見えたものを出す。
             log.warning("動画一覧の通信を1件も受け取れませんでした。")
+            if self.config.headless:
+                # 実機で確認された最頻の原因。表示ありなら同じ条件で取得できた。
+                log.warning("  ★ headless (ブラウザ非表示) で実行しています。")
+                log.warning("     TikTok は非表示ブラウザからの検索結果を返さないことがあります。")
+                log.warning("     config.yaml の headless を false にしてください。")
             if page_hint:
                 log.warning("  画面の文言: %s", page_hint[:200])
             if other_api:
@@ -412,10 +419,10 @@ class TikTokVideoCollector(Collector):
 
     def _scroll(self, page: Any) -> None:
         """スクロールして追加の item_list をロードさせる."""
-        rounds = max(1, min(int(self.config.limit_per_type / 12), 6))
+        rounds = max(3, min(int(self.config.limit_per_type / 8), 8))
         for _ in range(rounds):
             try:
-                page.mouse.wheel(0, 3200)
-                page.wait_for_timeout(1600)
+                page.mouse.wheel(0, 3000)
+                page.wait_for_timeout(1800)
             except Exception:
                 break

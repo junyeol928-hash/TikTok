@@ -107,9 +107,11 @@ notify_channels: []           # slack / discord / email / file
 
 # --- 動作 ---
 request_interval: 1.2         # 同一ホストへの最小リクエスト間隔 (秒). 下げすぎない
-# false にするとブラウザが画面に表示される。
-# 自動操作と判定されて弾かれる場合は false を試す。
-headless: true
+# ブラウザを画面に表示せずに動かすか。
+# false を推奨。TikTok は非表示ブラウザからの検索結果を返さないことがあり、
+# 実機では true だと 0 件、false だと取得できることを確認している。
+# true にすると収集中に画面が出ないが、0 件になる可能性がある。
+headless: false
 keep_days: 180
 
 # --- 有料分析サービスを使う場合 (任意) ---
@@ -220,8 +222,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if reachable else 2
 
 
+def _apply_browser_flags(cfg: Config, args: argparse.Namespace) -> None:
+    """--visible / --headless を設定より優先させる.
+
+    利用者が既に生成済みの config.yaml を編集しなくても切り替えられるようにする。
+    TikTok は非表示ブラウザに検索結果を返さないことがあるため、
+    ここを手早く変えられることが実用上重要。
+    """
+    if getattr(args, "visible", False):
+        cfg.headless = False
+    elif getattr(args, "headless", False):
+        cfg.headless = True
+
+
 def cmd_collect(args: argparse.Namespace) -> int:
     cfg = Config.load(args.config)
+    _apply_browser_flags(cfg, args)
     sources = args.source or None
     with _db(cfg) as db:
         from .analysis.digest import Radar
@@ -274,6 +290,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     """定期実行用: 収集 -> 分析 -> レポート -> 通知 を一気通貫で."""
     cfg = Config.load(args.config)
+    _apply_browser_flags(cfg, args)
     with _db(cfg) as db:
         from .analysis.digest import Radar
         from .notify import dispatch
@@ -327,6 +344,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     """ローカル Web アプリを起動する."""
     cfg = Config.load(args.config)
+    _apply_browser_flags(cfg, args)
     from .server import serve
 
     with _db(cfg) as db:
@@ -447,6 +465,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("collect", help="トレンドを収集して保存する")
     s.add_argument("--source", "-s", action="append", help="使う収集元 (複数可)")
     s.add_argument("--region", "-r", action="append", help="対象国 (複数可)")
+    s.add_argument("--visible", action="store_true",
+                   help="ブラウザを表示して収集する (TikTokが非表示を弾く場合に必要)")
+    s.add_argument("--headless", action="store_true",
+                   help="ブラウザを表示せずに収集する (0件になる可能性あり)")
     s.set_defaults(func=cmd_collect)
 
     s = sub.add_parser("report", help="分析結果を表示する")
@@ -462,6 +484,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("run", help="収集〜通知まで一括実行 (定期実行向け)")
     s.add_argument("--source", "-s", action="append")
     s.add_argument("--region", "-r")
+    s.add_argument("--visible", action="store_true",
+                   help="ブラウザを表示して収集する (TikTokが非表示を弾く場合に必要)")
+    s.add_argument("--headless", action="store_true",
+                   help="ブラウザを表示せずに収集する (0件になる可能性あり)")
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("probe",
@@ -484,6 +510,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "cron を設定しなくても履歴が貯まる")
     s.add_argument("--collect-now", action="store_true",
                    help="起動直後に1回収集する")
+    s.add_argument("--visible", action="store_true",
+                   help="ブラウザを表示して収集する (TikTokが非表示を弾く場合に必要)")
+    s.add_argument("--headless", action="store_true",
+                   help="ブラウザを表示せずに収集する (0件になる可能性あり)")
     s.set_defaults(func=cmd_serve)
 
     s = sub.add_parser("watch", help="追跡リストを管理する")

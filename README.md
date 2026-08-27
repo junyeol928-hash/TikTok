@@ -323,6 +323,7 @@ ttradar doctor        # まずこれで切り分ける
 | `全候補エンドポイントが失敗` | TikTok 側の仕様変更。`sources` に `browser_creative_center` を追加する |
 | `playwright 未インストール` | `pip install playwright && playwright install chromium` |
 | 伸び率が全部 `—` | 履歴不足。時間を空けて複数回 `collect` する |
+| 収集が 0 件 | ブラウザ非表示 (`headless: true`) だと TikTok が検索結果を返さない。`--visible` を付ける。原因調査は `ttradar probe --visible` |
 | 商品が 1 件も取れない | TikTok Shop のデータは地域差が大きい。`regions: [US]` も試す。または `thirdparty` を検討 |
 | 429 が出る | `request_interval` を上げる (既定 1.2 秒)。下げすぎない |
 

@@ -15,9 +15,11 @@ if not exist ".venv\Scripts\ttradar.exe" (
 
 echo.
 echo  収集を開始します。数分かかります。
+echo  途中でブラウザが開きますが、触らずに待ってください。
+echo  (TikTok は非表示ブラウザに結果を返さないため表示して動かします)
 echo.
 
-".venv\Scripts\ttradar.exe" collect
+".venv\Scripts\ttradar.exe" collect --visible
 
 echo.
 echo  ---------------------------------------------

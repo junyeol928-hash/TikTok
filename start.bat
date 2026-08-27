@@ -16,10 +16,13 @@ echo.
 echo  ttradar を起動します
 echo  ブラウザが自動で開きます
 echo.
+echo  収集のたびに TikTok のブラウザ画面が開きますが、
+echo  触らずに放置してください。自動で閉じます。
+echo.
 echo  終了するには、このウィンドウで Ctrl+C を押してください
 echo.
 
-".venv\Scripts\ttradar.exe" serve --interval 120 --collect-now
+".venv\Scripts\ttradar.exe" serve --interval 120 --collect-now --visible
 
 echo.
 pause

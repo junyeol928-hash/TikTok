@@ -72,9 +72,11 @@ notify_channels: []           # slack / discord / email / file
 
 # --- 動作 ---
 request_interval: 1.2         # 同一ホストへの最小リクエスト間隔 (秒). 下げすぎない
-# false にするとブラウザが画面に表示される。
-# 自動操作と判定されて弾かれる場合は false を試す。
-headless: true
+# ブラウザを画面に表示せずに動かすか。
+# false を推奨。TikTok は非表示ブラウザからの検索結果を返さないことがあり、
+# 実機では true だと 0 件、false だと取得できることを確認している。
+# true にすると収集中に画面が出ないが、0 件になる可能性がある。
+headless: false
 keep_days: 180
 
 # --- 有料分析サービスを使う場合 (任意) ---
