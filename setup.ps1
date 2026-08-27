@@ -6,7 +6,10 @@
 # 仮想環境の作成・依存のインストール・Chromium の取得・設定ファイル生成・
 # 動作診断までを一度に行う。何度実行しても壊れない。
 
-$ErrorActionPreference = "Stop"
+# Stop にすると、native コマンド (pip 等) が stderr に何か書いただけで
+# Windows PowerShell 5.1 が NativeCommandError として異常終了させてしまう。
+# 成否は $LASTEXITCODE で明示的に判定するので Continue のままにする。
+$ErrorActionPreference = "Continue"
 
 function Step($m) { Write-Host ""; Write-Host "▸ $m" -ForegroundColor White }
 function Ok($m)   { Write-Host "  OK  $m" -ForegroundColor Green }
@@ -63,14 +66,14 @@ if (-not (Test-Path $vpy)) { Die ".venv が壊れています。.venv フォル�
 
 # ------------------------------------------------------------------ 依存
 Step "必要なライブラリをインストールしています (数分かかります)"
-& $vpy -m pip install --quiet --upgrade pip 2>$null | Out-Null
+& $vpy -m pip install --quiet --upgrade pip | Out-Null
 & $vpy -m pip install --quiet -e ".[browser]"
 if ($LASTEXITCODE -ne 0) { Die "ライブラリのインストールに失敗しました。ネットワーク接続を確認してください" }
 Ok "インストール完了"
 
 # ------------------------------------------------------------------ ブラウザ
 Step "Chromium を取得しています (初回のみ・約200MB)"
-& $vpy -m playwright install chromium 2>$null | Out-Null
+& $vpy -m playwright install chromium | Out-Null
 if ($LASTEXITCODE -eq 0) {
     Ok "取得完了"
 } else {
@@ -79,6 +82,10 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 # ------------------------------------------------------------------ 設定
+if (-not (Test-Path $vtt)) {
+    Die "ttradar のインストールに失敗しています。
+  上に出ているエラーメッセージを確認してください。"
+}
 Step "設定ファイルを用意しています"
 if (-not (Test-Path "config.yaml")) {
     & $vtt init | Out-Null

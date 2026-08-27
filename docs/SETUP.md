@@ -41,7 +41,7 @@ python3 --version
 以下を**まとめてコピー**してターミナルに貼り付け、Enter。
 
 ```bash
-cd ~/Desktop
+cd ~
 git clone https://github.com/junyeol928-hash/TikTok.git ttradar
 cd ttradar
 bash setup.sh
@@ -84,11 +84,15 @@ py --version
 ### 3. ダウンロードして実行する
 
 ```powershell
-cd $HOME\Desktop
+cd $HOME
 git clone https://github.com/junyeol928-hash/TikTok.git ttradar
 cd ttradar
 powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
+
+> `cd $HOME` はユーザーフォルダ (例: `C:\Users\yeol0`) に移動します。
+> デスクトップを指定しないのは、OneDrive を使っていると
+> デスクトップの実体が別の場所にあり `Desktop が存在しない` と言われるためです。
 
 > `git` が無いと言われたら <https://git-scm.com/download/win> から入れて、
 > PowerShell を開き直してもう一度実行してください。
@@ -109,13 +113,13 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 
 **Mac**
 ```bash
-cd ~/Desktop/ttradar
+cd ~/ttradar
 .venv/bin/ttradar serve --interval 120 --collect-now
 ```
 
 **Windows**
 ```powershell
-cd $HOME\Desktop\ttradar
+cd $HOME\ttradar
 .\.venv\Scripts\ttradar.exe serve --interval 120 --collect-now
 ```
 

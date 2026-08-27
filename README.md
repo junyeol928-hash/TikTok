@@ -86,6 +86,7 @@ ttradar は TikTok から**商品紹介動画そのもの**を集め、
 ### Mac / Linux
 
 ```bash
+cd ~
 git clone https://github.com/junyeol928-hash/TikTok.git ttradar
 cd ttradar
 bash setup.sh
@@ -94,6 +95,7 @@ bash setup.sh
 ### Windows
 
 ```powershell
+cd $HOME
 git clone https://github.com/junyeol928-hash/TikTok.git ttradar
 cd ttradar
 powershell -ExecutionPolicy Bypass -File setup.ps1
