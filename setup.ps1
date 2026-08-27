@@ -1,4 +1,4 @@
-# ttradar セットアップ (Windows / PowerShell)
+﻿# ttradar セットアップ (Windows / PowerShell)
 #
 #   PowerShell を開いてこのフォルダで:
 #     powershell -ExecutionPolicy Bypass -File setup.ps1
@@ -24,6 +24,8 @@ Write-Host "TikTok 商品紹介トレンドレーダー" -ForegroundColor DarkGr
 
 # ------------------------------------------------------------------ Python
 Step "Python を確認しています"
+# Python 側のコードは ASCII のみ。単一引用符なので PowerShell は展開しない。
+$verCheck = 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
 $py = $null
 foreach ($cand in @("py -3.13", "py -3.12", "py -3.11", "py -3.10", "py -3", "python")) {
     # $args は PowerShell の自動変数なので代入してはいけない ($cmdArgs を使う)
@@ -31,9 +33,10 @@ foreach ($cand in @("py -3.13", "py -3.12", "py -3.11", "py -3.10", "py -3", "py
     $exe = $parts[0]
     $cmdArgs = if ($parts.Count -gt 1) { $parts[1..($parts.Count-1)] } else { @() }
     if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+    # 標準出力を拾わず終了コードだけで判定する (引用符の入れ子を減らすため)
     try {
-        $check = & $exe @cmdArgs -c "import sys; print(1 if sys.version_info>=(3,10) else 0)" 2>$null
-        if ("$check".Trim() -eq "1") { $py = $exe; $pyArgs = $cmdArgs; break }
+        & $exe @cmdArgs -c $verCheck | Out-Null
+        if ($LASTEXITCODE -eq 0) { $py = $exe; $pyArgs = $cmdArgs; break }
     } catch { }
 }
 if (-not $py) {

@@ -1,0 +1,6 @@
+# Windows PowerShell 5.1 は BOM の無い .ps1 を CP932 として読むため、
+# 日本語が文字化けして構文エラーになる。BOM と CRLF を必ず保持する。
+*.ps1 text eol=crlf working-tree-encoding=UTF-8
+
+# シェルスクリプトは LF のまま (CRLF だと bash が実行できない)
+*.sh text eol=lf
