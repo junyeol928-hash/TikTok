@@ -10,7 +10,9 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PS1 = ROOT / "setup.ps1"
 SH = ROOT / "setup.sh"
-BATS = [ROOT / n for n in ("setup.bat", "start.bat", "update.bat")]
+# ハードコードせず自動列挙する。新しい .bat を足したときに
+# 検査から漏れると、文字化けや cd 忘れがそのまま利用者に届いてしまう。
+BATS = sorted(ROOT.glob("*.bat"))
 COMMAND = ROOT / "start.command"
 
 

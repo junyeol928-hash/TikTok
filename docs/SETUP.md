@@ -124,6 +124,8 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 |---|---|---|
 | アプリを開く | `start.bat` | `start.command` |
 | 最新版に更新する | `update.bat` | ターミナルで `cd` してから `git pull` |
+| 1回だけ収集して結果を見る | `collect.bat` | `.venv/bin/ttradar collect` |
+| 収集が0件のとき原因を調べる | `probe.bat` | `.venv/bin/ttradar probe --visible` |
 | もう一度セットアップ | `setup.bat` | ターミナルで `bash setup.sh` |
 
 タスクバーやDockに登録しておくと、次からは 1 クリックで開けます。
@@ -174,6 +176,7 @@ TikTok に接続できていません。よくある原因は次の通りです�
 | インストールが途中で止まる | ネットワークを確認し、もう一度 `bash setup.sh` を実行（何度実行しても安全です） |
 | `.venv が壊れています` | `.venv` フォルダを削除してからもう一度セットアップ |
 | `not a git repository` | フォルダの外にいます。`cd ttradar` してから実行 |
+| `ttradar.exe が認識されません` | フォルダが違います。`cd` を余分にしていないか確認 (`pwd` で現在地を表示)。迷ったら `.bat` をダブルクリックするのが確実 |
 | `'if' を使用できません` など大量の構文エラー (Windows) | スクリプトが古い可能性。`git pull` してからやり直す |
 | 文字が `縺九ｉ` のように化ける (Windows) | 同上。`git pull` で最新版を取得してください |
 | 数字が全部 `—` になる | 履歴不足。`--interval` を付けたまま数時間そのままにしておく |
