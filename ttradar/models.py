@@ -74,6 +74,7 @@ class M:
     LIKES = "likes"
     COMMENTS = "comments"
     SHARES = "shares"
+    SAVES = "saves"                     # 保存数. 商品紹介では購買意欲の最重要シグナル
     FOLLOWERS = "followers"
     SALES = "sales"                     # 販売個数
     REVENUE = "revenue"                 # 売上金額
@@ -86,6 +87,15 @@ class M:
     RANK = "rank"                       # ランキング順位 (小さいほど上位)
     CTR = "ctr"
     ENGAGEMENT_RATE = "engagement_rate"
+    SAVE_RATE = "save_rate"             # 保存率 = 保存数 / 再生数
+    DURATION = "duration"               # 動画の長さ (秒)
+    VIDEO_COUNT = "video_count"         # その商品を紹介している動画の本数
+    CREATOR_COUNT = "creator_count"     # その商品を紹介しているクリエイター数
+    TOTAL_VIEWS = "total_views"         # 紹介動画の合計再生数
+    MEDIAN_VIEWS = "median_views"       # 紹介動画の再生数の中央値
+    AGE_HOURS = "age_hours"             # 投稿からの経過時間
+    VELOCITY = "velocity"               # 再生数 / 経過時間 (時速)
+    HIT_RATE = "hit_rate"               # 全体中央値を超えた動画の割合 = 再現性
 
 
 #: エンティティ種別ごとの「主要ボリューム指標」。伸び率はこの値で計算する。

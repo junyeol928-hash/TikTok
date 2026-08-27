@@ -36,12 +36,49 @@ APP_HTML = Path(__file__).parent / "report" / "templates" / "app.html"
 #: 収集ジョブの状態 (UI のボタン表示に使う)
 _job_lock = threading.Lock()
 _job: dict[str, Any] = {"running": False, "started": 0.0, "finished": 0.0,
-                        "result": None, "error": None}
+                        "result": None, "error": None,
+                        "interval_min": 0, "next_run": 0.0, "runs": 0}
 
 
 def _job_snapshot() -> dict[str, Any]:
     with _job_lock:
         return dict(_job)
+
+
+class Scheduler(threading.Thread):
+    """一定間隔で収集を回すバックグラウンドスレッド.
+
+    cron を設定しなくても「アプリを開いておけば勝手に貯まる」状態にするためのもの。
+    伸び率は履歴の差分でしか出ないので、**定期実行はこのツールの前提**であり、
+    それをユーザーの環境構築に依存させないほうが確実に動く。
+    """
+
+    def __init__(self, cfg: Config, interval_min: float, run_now: bool = False):
+        super().__init__(daemon=True)
+        self.cfg = cfg
+        self.interval = max(5.0, float(interval_min)) * 60.0
+        self.run_now = run_now
+        self._stop = threading.Event()
+
+    def run(self) -> None:
+        with _job_lock:
+            _job["interval_min"] = round(self.interval / 60)
+        # 起動直後に 1 回走らせるかは呼び出し側の指定に従う
+        wait = 0.0 if self.run_now else self.interval
+        while not self._stop.is_set():
+            with _job_lock:
+                _job["next_run"] = time.time() + wait
+            if self._stop.wait(wait):
+                break
+            try:
+                log.info("定期収集を開始します")
+                _run_collect(self.cfg)
+            except Exception:  # noqa: BLE001 - スレッドを死なせない
+                log.exception("定期収集が失敗しました")
+            wait = self.interval
+
+    def stop(self) -> None:
+        self._stop.set()
 
 
 def _run_collect(cfg: Config) -> None:
@@ -58,7 +95,8 @@ def _run_collect(cfg: Config) -> None:
                    "errors": res.errors, "by_source": res.by_source,
                    "duration": round(res.duration, 1)}
         with _job_lock:
-            _job.update(running=False, finished=time.time(), result=payload)
+            _job.update(running=False, finished=time.time(), result=payload,
+                        runs=_job.get("runs", 0) + 1)
     except Exception as e:  # noqa: BLE001
         log.exception("収集ジョブが失敗しました")
         with _job_lock:
@@ -112,12 +150,23 @@ class Api:
                         if q in s.name.lower() or q in (s.category or "").lower()]
 
             rows = []
-            for s in sigs[:limit]:
-                d = s.to_dict()
-                d["spark"] = self._spark(db, s.entity_key)
-                d["primary_metric"] = PRIMARY_METRIC.get(s.entity_type)
+            for sig in sigs[:limit]:
+                d = sig.to_dict()
+                d["spark"] = self._spark(db, sig.entity_key)
+                d["primary_metric"] = PRIMARY_METRIC.get(sig.entity_type)
+                # 代表動画・よく使われるタグ・投稿者は UI の主役なので一緒に返す
+                d["extra"] = self._latest_extra(db, sig.entity_key)
                 rows.append(d)
             return {"count": len(sigs), "rows": rows}
+
+    def _latest_extra(self, db: Database, key: str) -> dict[str, Any]:
+        row = db.latest_snapshot(key)
+        if row is None:
+            return {}
+        try:
+            return json.loads(row["extra"] or "{}")
+        except (ValueError, TypeError):
+            return {}
 
     def _spark(self, db: Database, key: str, points: int = 14) -> list[float]:
         """スパークライン用に主要指標の推移を間引いて返す."""
@@ -127,6 +176,44 @@ class Api:
             return vals
         step = len(vals) / points
         return [vals[min(int(i * step), len(vals) - 1)] for i in range(points)]
+
+    def videos(self, window: float | None, region: str | None,
+               sort: str, query: str | None, limit: int) -> dict[str, Any]:
+        """伸びている商品紹介動画そのものを返す.
+
+        商品を決める前に「どんな動画が伸びているか」を見たい場面のためのビュー。
+        並び順を変えられるのが要点: 再生数が多い動画と、
+        投稿から日が浅いのに伸びている動画 (時速) では意味が違う。
+        """
+        with Database(self.cfg.db_path) as db:
+            digest = Radar(self.cfg, db).analyze(region=region, window_hours=window)
+            vids = digest.by_type.get(EntityType.VIDEO, [])
+            rows = []
+            for sig in vids:
+                d = sig.to_dict()
+                d["extra"] = self._latest_extra(db, sig.entity_key)
+                rows.append(d)
+
+            if query:
+                q = query.lower()
+                rows = [r for r in rows
+                        if q in r["name"].lower()
+                        or q in str((r["extra"] or {}).get("creator", "")).lower()
+                        or any(q in str(t).lower()
+                               for t in (r["extra"] or {}).get("hashtags", []))]
+
+            keyed = {
+                "views": lambda r: r["metrics"].get(M.VIEWS, 0),
+                "likes": lambda r: r["metrics"].get(M.LIKES, 0),
+                "saves": lambda r: r["metrics"].get(M.SAVES, 0),
+                "velocity": lambda r: r["metrics"].get(M.VELOCITY, 0),
+                "engagement": lambda r: r["metrics"].get(M.ENGAGEMENT_RATE, 0),
+                "save_rate": lambda r: r["metrics"].get(M.SAVE_RATE, 0),
+                "recent": lambda r: -r["metrics"].get(M.AGE_HOURS, 1e9),
+                "score": lambda r: r["score"],
+            }.get(sort or "views", lambda r: r["metrics"].get(M.VIEWS, 0))
+            rows.sort(key=keyed, reverse=True)
+            return {"count": len(rows), "rows": rows[:limit]}
 
     def history(self, key: str) -> dict[str, Any]:
         """詳細チャート用の完全な時系列."""
@@ -248,6 +335,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.signals(
                     fnum("window"), one("region"), one("type"), one("stage"),
                     one("q"), int(one("limit", 300) or 300)))
+            if u.path == "/api/videos":
+                return self._json(self.api.videos(
+                    fnum("window"), one("region"), one("sort", "views"),
+                    one("q"), int(one("limit", 60) or 60)))
             if u.path == "/api/history":
                 key = one("key")
                 if not key:
@@ -295,9 +386,20 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(cfg: Config, host: str = "127.0.0.1", port: int = 8765,
-          open_browser: bool = True) -> None:
-    """ローカル Web アプリを起動する."""
+          open_browser: bool = True, interval_min: float = 0,
+          collect_now: bool = False) -> None:
+    """ローカル Web アプリを起動する.
+
+    ``interval_min`` を指定すると、その間隔で収集を自動実行する
+    (cron を設定しなくてもアプリを開いておくだけで履歴が貯まる)。
+    """
     api = Api(cfg)
+    scheduler: Scheduler | None = None
+    if interval_min and interval_min > 0:
+        scheduler = Scheduler(cfg, interval_min, run_now=collect_now)
+        scheduler.start()
+    elif collect_now:
+        threading.Thread(target=_run_collect, args=(cfg,), daemon=True).start()
     handler = partial(Handler, api=api, cfg=cfg)
     httpd = ThreadingHTTPServer((host, port), handler)
 
@@ -306,6 +408,9 @@ def serve(cfg: Config, host: str = "127.0.0.1", port: int = 8765,
     if host == "0.0.0.0":
         print("  ⚠ 0.0.0.0 で待ち受けています。同じネットワークの他の端末から")
         print("     収集データが見えます。信頼できるネットワークでのみ使用してください。\n")
+    if scheduler is not None:
+        print(f"  ⏱ {round(scheduler.interval/60)} 分ごとに自動収集します"
+              f"（アプリを開いたままにしてください）\n")
     print("  終了するには Ctrl+C\n")
 
     if open_browser:
@@ -315,4 +420,6 @@ def serve(cfg: Config, host: str = "127.0.0.1", port: int = 8765,
     except KeyboardInterrupt:
         print("\n終了しました。")
     finally:
+        if scheduler is not None:
+            scheduler.stop()
         httpd.server_close()

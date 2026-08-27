@@ -26,7 +26,8 @@ from .util.log import get, setup
 
 # collector をレジストリに登録するため副作用 import が必要
 from .collectors import (base, browser, creative_center,  # noqa: F401
-                         demo as demo_mod, thirdparty, ytdlp_source)
+                         demo as demo_mod, thirdparty, tiktok_video,
+                         ytdlp_source)
 
 log = get(__name__)
 
@@ -37,12 +38,25 @@ CONFIG_TEMPLATE = """\
 regions: [JP]                 # 対象国。US, GB なども可 (Creative Center の対応国)
 
 sources:                      # 収集元。上から順に実行される
-  - creative_center           # 公式 Creative Center の JSON API (認証不要 / 高速)
-  - browser_creative_center   # 実ブラウザで開いて XHR 傍受 (低速だが壊れにくい)
+  - tiktok_video              # ★主力: TikTok本体から商品紹介動画を集める
+                              #   ここから商品・クリエイター・タグを自動で導出する
+  - creative_center           # 補助: Creative Center の全体トレンド (認証不要)
+  # - browser_creative_center # Creative Center を実ブラウザで開いて XHR 傍受
   # - ytdlp_watch             # watchlist のクリエイターを定点観測
   # - thirdparty              # 有料分析サービス (下の thirdparty_apis を参照)
 
 entity_types: [hashtag, song, video, product, keyword]
+
+# --- 商品紹介動画をどう探すか (tiktok_video 用) ---
+video_queries:                # TikTok 検索に投げるキーワード
+  - 購入品紹介
+  - 買ってよかった
+  - 正直レビュー
+  - おすすめ商品
+  - 便利グッズ
+  - 神アイテム
+video_hashtags: []            # ハッシュタグページも見に行く (例: [購入品紹介, 便利グッズ])
+min_product_intent: 0.35      # 商品紹介らしさがこれ未満の動画は集計から除外
 
 limit_per_type: 50            # 1 種別あたりの取得件数
 period_days: 7                # Creative Center の集計期間 (7 / 30 / 120)
@@ -60,7 +74,15 @@ weights:                      # ハッシュタグ/楽曲/キーワード用の�
   freshness: 0.10             #   新しさ
   competition: 0.15           #   競合の少なさ
 
-product_weights:              # 商品用の重み
+video_product_weights:        # ★動画から導出した商品の重み (通常はこちらが使われる)
+  median_views: 0.28          #   代表的な1本がどれだけ伸びるか (合計ではなく中央値)
+  save_rate: 0.20             #   保存率 = 購買意欲
+  reproducibility: 0.18       #   まぐれの1本ではないか
+  competition: 0.18           #   紹介動画の本数 (少なすぎも多すぎもNG)
+  growth: 0.10                #   前回からの伸び
+  engagement: 0.06            #   エンゲージ率
+
+product_weights:              # 販売数・報酬率が取れる場合の重み (thirdparty 等)
   sales_velocity: 0.30        #   売れ行きの伸び
   commission: 0.20            #   報酬率
   low_competition: 0.20       #   紹介動画がまだ少ない
@@ -300,7 +322,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("   `ttradar collect` を実行してください。")
         print("   オフラインで見た目を確認するなら `ttradar demo` が先です。\n")
 
-    serve(cfg, host=args.host, port=args.port, open_browser=not args.no_browser)
+    serve(cfg, host=args.host, port=args.port, open_browser=not args.no_browser,
+          interval_min=args.interval, collect_now=args.collect_now)
     return 0
 
 
@@ -431,6 +454,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", default="127.0.0.1",
                    help="既定は 127.0.0.1 (自分の PC のみ). 0.0.0.0 は同一 LAN に公開されるので注意")
     s.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
+    s.add_argument("--interval", type=float, default=0, metavar="分",
+                   help="この分数ごとに自動収集する (例: --interval 120 で2時間ごと)。"
+                        "cron を設定しなくても履歴が貯まる")
+    s.add_argument("--collect-now", action="store_true",
+                   help="起動直後に1回収集する")
     s.set_defaults(func=cmd_serve)
 
     s = sub.add_parser("watch", help="追跡リストを管理する")

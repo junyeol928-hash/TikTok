@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from ..config import Config, ProductWeights, ScoreWeights
+from ..config import Config, ProductWeights, ScoreWeights, VideoProductWeights
 from ..models import M, TrendStage
 from .metrics import GrowthResult, log_scale, percentile_rank, saturating
 
@@ -256,6 +256,142 @@ def score_product(
         + w.trend_stage * stage_score
         + w.price_fit * price_score
         + w.rating * rating_score
+    ) / total_w
+
+    score = base * 100.0
+    if niche_match:
+        score *= 1.15
+        reasons.append("自分のニッチに合致")
+
+    reasons.append(STAGE_ADVICE.get(stage, ""))
+    return max(0.0, min(100.0, score)), [r for r in reasons if r]
+
+
+
+# --------------------------------------------------- 動画から導出した商品のスコア
+
+#: 紹介動画の本数の「おいしい」範囲。
+#: 少なすぎる = まだ誰も試していない (売れる保証がない)
+#: 多すぎる   = 飽和していて、自分の 1 本が埋もれる
+COMPETITION_SWEET_LO = 3
+COMPETITION_SWEET_HI = 25
+#: これを超えたら明確なレッドオーシャン
+COMPETITION_SATURATED = 120
+
+
+def competition_fit(video_count: float | None) -> tuple[float, str | None]:
+    """紹介動画の本数を 0-1 のスコアにする (山型).
+
+    本数は「競合の多さ」であると同時に「売れる証拠」でもある。
+    単調減少でも単調増加でもなく、山型にするのが正しい。
+    """
+    if video_count is None:
+        return 0.5, None
+    n = float(video_count)
+    if n <= 1:
+        return 0.30, "紹介動画がまだ 1 本 — 売れる保証はないが先行できる"
+    if n < COMPETITION_SWEET_LO:
+        return 0.65, f"紹介動画 {n:.0f} 本 — 検証はこれから"
+    if n <= COMPETITION_SWEET_HI:
+        return 1.0, f"紹介動画 {n:.0f} 本 — 売れる証拠があり、まだ埋もれない"
+    if n <= COMPETITION_SATURATED:
+        # 25 -> 120 本で 1.0 から 0.3 へなだらかに落とす
+        t = (n - COMPETITION_SWEET_HI) / (COMPETITION_SATURATED - COMPETITION_SWEET_HI)
+        return 1.0 - 0.7 * t, f"紹介動画 {n:.0f} 本 — 競合が増えてきている"
+    return 0.15, f"紹介動画 {n:.0f} 本 — 飽和。今から入っても埋もれる"
+
+
+def score_video_product(
+    growth: GrowthResult,
+    stage: TrendStage,
+    metrics: dict[str, float],
+    median_views_cohort: Sequence[float],
+    weights: "VideoProductWeights",
+    niche_match: bool = False,
+) -> tuple[float, list[str]]:
+    """実際の紹介動画から導出した商品のスコア.
+
+    「この商品で動画を撮ったら伸びるか」を、実際に投稿されている
+    紹介動画の成績から推定する。販売数や報酬率が取れない代わりに、
+    **中央値再生数・保存率・再現性** という、より投稿判断に近い軸で測る。
+    """
+    reasons: list[str] = []
+    w = weights
+
+    # --- 代表的な 1 本がどれだけ伸びるか (合計ではなく中央値) ---
+    med = metrics.get(M.MEDIAN_VIEWS)
+    if med is None:
+        med_score = 0.4
+    else:
+        med_score = percentile_rank(med, median_views_cohort or [med])
+        if med >= 100_000:
+            reasons.append(f"紹介動画の中央値が {_fmt_num(med)} 再生 — 型として成立している")
+        elif med < 5_000:
+            reasons.append(f"中央値 {_fmt_num(med)} 再生 — 伸びている動画は一部だけ")
+
+    # --- 保存率: 商品紹介で最も購買意欲に近いシグナル ---
+    sr = metrics.get(M.SAVE_RATE)
+    if sr is None:
+        save_score = 0.4
+    else:
+        # 保存率 3% で満点扱い。通常 1% 前後、3% 超は「買う気で見られている」
+        save_score = min(1.0, sr / 0.03)
+        if sr >= 0.03:
+            reasons.append(f"保存率 {sr:.1%} — 買う気で見られている")
+        elif sr < 0.005:
+            reasons.append(f"保存率 {sr:.1%} — 見られてはいるが購買には繋がりにくい")
+
+    # --- 再現性: まぐれの 1 本か、安定して伸びるか ---
+    hit = metrics.get(M.HIT_RATE)
+    n_vid = metrics.get(M.VIDEO_COUNT)
+    if hit is None or not n_vid or n_vid < 2:
+        hit_score = 0.45
+    else:
+        hit_score = hit
+        if hit >= 0.6 and n_vid >= 3:
+            reasons.append(f"{n_vid:.0f} 本中 {hit:.0%} が平均超え — 再現性が高い")
+        elif hit <= 0.25 and n_vid >= 4:
+            reasons.append(f"{n_vid:.0f} 本中 {hit:.0%} しか伸びていない — 当たりは一部")
+
+    # --- 競合の本数 (山型) ---
+    comp_score, comp_reason = competition_fit(n_vid)
+    if comp_reason:
+        reasons.append(comp_reason)
+
+    creators = metrics.get(M.CREATOR_COUNT)
+    if creators is not None and n_vid and creators <= 2 and n_vid >= 4:
+        reasons.append(f"投稿者は {creators:.0f} 人だけ — 一人が量産しているだけの可能性")
+
+    # --- 伸び (前回収集との差分) ---
+    daily = growth.daily_rate if growth.daily_rate is not None else 0.0
+    if growth.from_zero and growth.daily_rate is None:
+        growth_score = 1.0
+        reasons.append("今回初めて観測された商品")
+    else:
+        growth_score = saturating(daily, scale=0.5)
+        if daily >= 0.3:
+            reasons.append(f"紹介動画の再生が急増: 日次 {_fmt_pct(daily)}")
+        elif daily < -0.1:
+            reasons.append(f"勢いが落ちている: 日次 {_fmt_pct(daily)}")
+
+    stage_score = {
+        TrendStage.EMERGING: 1.0, TrendStage.NEW: 0.85, TrendStage.RISING: 0.85,
+        TrendStage.STABLE: 0.5, TrendStage.PEAKING: 0.25, TrendStage.DECLINING: 0.05,
+    }.get(stage, 0.5)
+
+    # --- エンゲージ率 ---
+    eng = metrics.get(M.ENGAGEMENT_RATE)
+    eng_score = 0.4 if eng is None else min(1.0, eng / 0.12)
+
+    total_w = (w.median_views + w.save_rate + w.reproducibility
+               + w.competition + w.growth + w.engagement) or 1.0
+    base = (
+        w.median_views * med_score
+        + w.save_rate * save_score
+        + w.reproducibility * hit_score
+        + w.competition * comp_score
+        + w.growth * (0.6 * growth_score + 0.4 * stage_score)
+        + w.engagement * eng_score
     ) / total_w
 
     score = base * 100.0

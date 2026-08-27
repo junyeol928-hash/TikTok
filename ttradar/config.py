@@ -19,6 +19,16 @@ log = get(__name__)
 
 DEFAULT_CONFIG_PATHS = ["config.yaml", "config.yml", "~/.config/ttradar/config.yaml"]
 
+#: Config の属性ではなく ``Config.raw`` から直接読まれる設定キー。
+#: collector 側が自由な形で読むため属性にしていないだけで、正当なキー。
+#: ここに載せておかないと「未知のキー」警告が出て利用者を不安にさせる。
+RAW_ONLY_KEYS = {
+    "video_queries",        # tiktok_video: 検索キーワード
+    "video_hashtags",       # tiktok_video: 見に行くハッシュタグ
+    "min_product_intent",   # tiktok_video: 商品紹介らしさの下限
+    "thirdparty_apis",      # thirdparty: 外部 API 定義
+}
+
 
 @dataclass
 class ScoreWeights:
@@ -57,6 +67,21 @@ class ProductWeights:
 
 
 @dataclass
+class VideoProductWeights:
+    """実際の紹介動画から導出した商品のスコア重み.
+
+    販売数や報酬率が取れない代わりに、投稿判断により近い軸で測る。
+    """
+
+    median_views: float = 0.28      # 代表的な1本がどれだけ伸びるか
+    save_rate: float = 0.20         # 保存率 = 購買意欲
+    reproducibility: float = 0.18   # まぐれの1本ではないか
+    competition: float = 0.18       # 紹介動画の本数 (山型: 少なすぎも多すぎもNG)
+    growth: float = 0.10            # 前回からの伸び
+    engagement: float = 0.06        # エンゲージ率
+
+
+@dataclass
 class Config:
     # --- 取得対象 ---
     regions: list[str] = field(default_factory=lambda: ["JP"])
@@ -85,6 +110,7 @@ class Config:
     notify_cooldown_hours: float = 48.0
     weights: ScoreWeights = field(default_factory=ScoreWeights)
     product_weights: ProductWeights = field(default_factory=ProductWeights)
+    video_product_weights: VideoProductWeights = field(default_factory=VideoProductWeights)
     #: 衝動買いしやすい価格帯 (円). 商品スコアの price_fit に使う
     price_sweet_spot: tuple[float, float] = (1000.0, 6000.0)
 
@@ -156,10 +182,17 @@ class Config:
                     k: float(v) for k, v in value.items()
                     if k in ProductWeights.__dataclass_fields__
                 })
+            elif key == "video_product_weights" and isinstance(value, dict):
+                cfg.video_product_weights = VideoProductWeights(**{
+                    k: float(v) for k, v in value.items()
+                    if k in VideoProductWeights.__dataclass_fields__
+                })
             elif key == "price_sweet_spot" and isinstance(value, (list, tuple)) and len(value) == 2:
                 cfg.price_sweet_spot = (float(value[0]), float(value[1]))
             elif hasattr(cfg, key):
                 setattr(cfg, key, value)
+            elif key in RAW_ONLY_KEYS:
+                pass          # collector が cfg.raw から直接読む
             else:
                 log.warning("設定に未知のキーがあります (無視します): %s", key)
 

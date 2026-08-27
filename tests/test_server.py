@@ -8,6 +8,7 @@ import json
 
 import pytest
 
+from ttradar.analysis.rollup import rollup_all
 from ttradar.collectors.demo import DemoCollector
 from ttradar.config import Config
 from ttradar.db import Database
@@ -29,7 +30,8 @@ def seeded(cfg):
     """7 日分の履歴を入れた状態."""
     db = Database(cfg.db_path)
     for off in range(7, -1, -1):
-        db.upsert_snapshots(DemoCollector(cfg, day_offset=float(off)).collect("JP"))
+        vids = DemoCollector(cfg, day_offset=float(off)).collect("JP")
+        db.upsert_snapshots(vids + rollup_all(vids, "JP"))
     db.close()
     return cfg
 
@@ -81,7 +83,7 @@ def test_signals_filters(seeded):
     only = api.signals(72, "JP", "product", None, None, 100)["rows"]
     assert only and all(x["entity_type"] == "product" for x in only)
 
-    hit = api.signals(72, "JP", None, None, "アイマスク", 100)["rows"]
+    hit = api.signals(72, "JP", "product", None, "アイマスク", 100)["rows"]
     assert hit and all("アイマスク" in x["name"] for x in hit)
 
     none = api.signals(72, "JP", None, None, "存在しない商品名xyz", 100)
@@ -134,10 +136,55 @@ def test_all_api_output_is_json_serializable(seeded):
         json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def test_app_html_is_self_contained():
-    """CDN 依存が無いこと (オフラインで動く要件)."""
+def test_app_html_has_no_cdn_dependencies():
+    """外部 JS/CSS ライブラリに依存しないこと.
+
+    Google Fonts だけは例外的に許可する (読み込めなくても
+    フォールバックの日本語フォントで完全に動作するため)。
+    JS ライブラリを CDN から読むと、オフラインや制限環境で
+    画面そのものが壊れるので許可しない。
+    """
     from ttradar.server import APP_HTML
     html = APP_HTML.read_text(encoding="utf-8")
     assert html.lower().startswith("<!doctype html>")
-    for bad in ("cdn.", "unpkg", "jsdelivr", "googleapis", "cdnjs"):
+    for bad in ("cdn.", "unpkg", "jsdelivr", "cdnjs", "<script src="):
         assert bad not in html, f"外部依存が混入しています: {bad}"
+
+
+def test_app_html_font_has_fallback():
+    """Web フォントが読めなくても日本語が崩れないこと."""
+    from ttradar.server import APP_HTML
+    html = APP_HTML.read_text(encoding="utf-8")
+    assert "Hiragino Sans" in html and "Noto Sans JP" in html
+
+
+def test_videos_endpoint(seeded):
+    api = Api(seeded)
+    v = api.videos(72, "JP", "views", None, 20)
+    assert v["count"] > 0 and len(v["rows"]) == 20
+    views = [r["metrics"].get("views", 0) for r in v["rows"]]
+    assert views == sorted(views, reverse=True)
+    for r in v["rows"][:5]:
+        assert r["extra"].get("creator")
+        assert r["extra"].get("product", {}).get("name")
+
+    # 並び替えが効くこと
+    by_vel = api.videos(72, "JP", "velocity", None, 10)["rows"]
+    vels = [r["metrics"].get("velocity", 0) for r in by_vel]
+    assert vels == sorted(vels, reverse=True)
+
+    # 投稿者で絞り込めること
+    who = v["rows"][0]["extra"]["creator"]
+    hit = api.videos(72, "JP", "views", who, 50)["rows"]
+    assert hit and all(who in str(r["extra"].get("creator", "")) for r in hit)
+
+
+def test_product_rows_carry_evidence(seeded):
+    """商品行が『根拠になった動画』とタグを持つこと (UI の主役)."""
+    rows = Api(seeded).signals(72, "JP", "product", None, None, 5)["rows"]
+    assert rows
+    top = rows[0]
+    assert top["extra"].get("top_videos"), "代表動画が無い"
+    assert top["extra"].get("hashtags"), "タグが無い"
+    for v in top["extra"]["top_videos"]:
+        assert v.get("views") is not None

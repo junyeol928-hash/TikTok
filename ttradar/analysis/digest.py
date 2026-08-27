@@ -16,7 +16,8 @@ from ..models import (PRIMARY_METRIC, EntityType, M, Snapshot, TrendSignal,
                       TrendStage)
 from ..util.log import get
 from .metrics import GrowthResult, compute_growth, classify_stage
-from .scoring import score_generic, score_product
+from .rollup import rollup_all
+from .scoring import score_generic, score_product, score_video_product
 
 log = get(__name__)
 
@@ -123,6 +124,18 @@ class Radar:
             except Exception:
                 pass
 
+        # 動画が取れていれば、そこから商品・クリエイター・ハッシュタグを導出する。
+        # 「どの商品で撮るか」の判断材料は集計値ではなく実際の紹介動画にあるため、
+        # これが本システムで最も価値のある変換になる。
+        videos = [s for s in all_snaps if s.entity_type == EntityType.VIDEO]
+        if videos:
+            for region in regions:
+                derived = rollup_all([v for v in videos if v.region == region], region)
+                if derived:
+                    all_snaps.extend(derived)
+                    result.by_source["rollup"] = (
+                        result.by_source.get("rollup", 0) + len(derived))
+
         result.collected = len(all_snaps)
         if all_snaps:
             result.inserted = self.db.upsert_snapshots(all_snaps)
@@ -181,6 +194,8 @@ class Radar:
                         else M.RELATED_CREATORS)
             comp_cohort = [r["metrics"].get(comp_key) for r in rows]
             comp_cohort = [c for c in comp_cohort if c is not None]
+            median_cohort = [r["metrics"].get(M.MEDIAN_VIEWS) for r in rows]
+            median_cohort = [c for c in median_cohort if c is not None]
 
             signals: list[TrendSignal] = []
             for r in rows:
@@ -195,7 +210,17 @@ class Radar:
                 stage = classify_stage(growth, is_new=r["is_new"])
                 niche = self._matches_niche(ent["name"], ent["category"])
 
-                if etype == EntityType.PRODUCT:
+                if etype == EntityType.PRODUCT and str(ent["source"]).startswith("rollup"):
+                    # 実際の紹介動画から導出した商品。
+                    # 販売数や報酬率は無いが、中央値再生数・保存率・再現性という
+                    # より投稿判断に近い軸で測れる。
+                    score, reasons = score_video_product(
+                        growth, stage, metrics,
+                        median_views_cohort=median_cohort,
+                        weights=self.config.video_product_weights,
+                        niche_match=niche,
+                    )
+                elif etype == EntityType.PRODUCT:
                     score, reasons = score_product(
                         growth, stage, metrics,
                         sales_cohort=volume_cohort,

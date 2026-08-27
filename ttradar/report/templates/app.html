@@ -4,377 +4,482 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/favicon.ico" type="image/svg+xml">
-<title>ttradar — TikTok トレンドレーダー</title>
+<title>ttradar — 商品紹介トレンド</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap">
 <style>
-/* ============================================================
-   デザイントークン
-   検証済みパレットに基づく。ライト/ダークは自動反転ではなく
-   それぞれの面に対して選び直した値を使う。
-   ============================================================ */
+/* ==========================================================================
+   ttradar — 商品紹介トレンド
+   配色は検証スクリプトで確認済み。
+   ステージは「好機 / 中立 / 注意」の3クラスに縮約し、
+   正確な段階は絵文字＋日本語ラベル＋バッジの形状で伝える。
+   色だけに意味を持たせない (赤緑の識別に依存しない) ための設計。
+   ========================================================================== */
 :root{
   color-scheme: light;
-  --surface:#fcfcfb; --plane:#f9f9f7; --raised:#ffffff;
-  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
-  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
-  --series:#2a78d6; --series-wash:rgba(42,120,214,.10);
-  --deemph:#c3c2b7;
-  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
-  --violet:#4a3aa7;
-  --shadow:0 1px 2px rgba(11,11,11,.04), 0 8px 24px rgba(11,11,11,.06);
-  --radius:14px;
+  --ground:#faf8f4; --panel:#ffffff; --panel-2:#f3f1ec; --rail:#f3f1ec;
+  --ink:#141312; --ink-2:#55524c; --ink-3:#8a8781;
+  --line:#e4e0d8; --line-2:#d6d1c6;
+  --accent:#2a78d6; --accent-ink:#ffffff; --accent-wash:rgba(42,120,214,.10);
+  --good:#0ca30c; --good-wash:rgba(12,163,12,.12);
+  --serious:#a3561f; --serious-wash:rgba(163,86,31,.12);
+  --critical:#d03b3b; --critical-wash:rgba(208,59,59,.12);
+  --grid:#e4e0d8; --axis:#c9c3b6; --deemph:#c9c3b6;
+  --shadow:0 1px 2px rgba(20,19,18,.05), 0 10px 30px rgba(20,19,18,.06);
+  --r:14px;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     color-scheme: dark;
-    --surface:#1a1a19; --plane:#0d0d0d; --raised:#212120;
-    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
-    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
-    --series:#3987e5; --series-wash:rgba(57,135,229,.14);
-    --deemph:#4a4a46;
-    --violet:#9085e9;
-    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    --ground:#141312; --panel:#1e1c1a; --panel-2:#262320; --rail:#191715;
+    --ink:#efede8; --ink-2:#b3afa6; --ink-3:#8a8781;
+    --line:#2e2b27; --line-2:#3a3630;
+    --accent:#3987e5; --accent-ink:#0b1220; --accent-wash:rgba(57,135,229,.16);
+    --good:#0ca30c; --good-wash:rgba(12,163,12,.16);
+    --serious:#ec835a; --serious-wash:rgba(236,131,90,.16);
+    --critical:#e66767; --critical-wash:rgba(230,103,103,.16);
+    --grid:#2a2724; --axis:#3f3b35; --deemph:#4a4640;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 34px rgba(0,0,0,.4);
   }
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
-  --surface:#1a1a19; --plane:#0d0d0d; --raised:#212120;
-  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
-  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
-  --series:#3987e5; --series-wash:rgba(57,135,229,.14);
-  --deemph:#4a4a46;
-  --violet:#9085e9;
-  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  --ground:#141312; --panel:#1e1c1a; --panel-2:#262320; --rail:#191715;
+  --ink:#efede8; --ink-2:#b3afa6; --ink-3:#8a8781;
+  --line:#2e2b27; --line-2:#3a3630;
+  --accent:#3987e5; --accent-ink:#0b1220; --accent-wash:rgba(57,135,229,.16);
+  --good:#0ca30c; --good-wash:rgba(12,163,12,.16);
+  --serious:#ec835a; --serious-wash:rgba(236,131,90,.16);
+  --critical:#e66767; --critical-wash:rgba(230,103,103,.16);
+  --grid:#2a2724; --axis:#3f3b35; --deemph:#4a4640;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 34px rgba(0,0,0,.4);
 }
 
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
-  margin:0; background:var(--plane); color:var(--ink);
-  font-family:system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
-  font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI",
+    "Noto Sans JP",system-ui,-apple-system,sans-serif;
+  font-size:14px; line-height:1.65; -webkit-font-smoothing:antialiased;
+  font-feature-settings:"palt" 1;
 }
 button,input,select{font:inherit;color:inherit}
-a{color:inherit}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 
-/* ---------------------------------------------------------------- ヘッダー */
-.top{
-  position:sticky; top:0; z-index:40; background:color-mix(in srgb,var(--plane) 88%,transparent);
-  backdrop-filter:saturate(160%) blur(12px);
-  border-bottom:1px solid var(--border);
+/* ------------------------------------------------------------------ 骨格 */
+.shell{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+.rail{
+  background:var(--rail);border-right:1px solid var(--line);
+  padding:18px 12px;display:flex;flex-direction:column;gap:2px;
+  position:sticky;top:0;height:100vh;overflow-y:auto;
 }
-.top-in{max-width:1280px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:14px}
-.brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.01em;font-size:15px}
-.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--series);
-  box-shadow:0 0 0 4px var(--series-wash)}
-.brand small{font-weight:500;color:var(--muted);font-size:11.5px;letter-spacing:.02em;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
-.spacer{flex:1}
-.ctl{display:flex;align-items:center;gap:7px}
+.mark{display:flex;align-items:center;gap:9px;padding:4px 10px 18px;font-weight:900;
+  font-size:16px;letter-spacing:-.02em}
+.mark .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 0 4px var(--accent-wash);flex:none}
+.navlabel{font-size:10px;font-weight:700;color:var(--ink-3);letter-spacing:.09em;
+  padding:14px 10px 6px}
+.nav{
+  display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;
+  cursor:pointer;border:none;background:transparent;width:100%;text-align:left;
+  font-size:13px;font-weight:500;color:var(--ink-2);transition:background .14s,color .14s;
+}
+.nav:hover{background:var(--panel-2);color:var(--ink)}
+.nav[aria-current="page"]{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.nav .ic{width:18px;text-align:center;flex:none;font-size:13px}
+.nav .n{margin-left:auto;font-size:11px;opacity:.65;font-variant-numeric:tabular-nums}
+.railfoot{margin-top:auto;padding:14px 10px 4px;border-top:1px solid var(--line);
+  font-size:10.5px;color:var(--ink-3);line-height:1.6}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.bar{
+  position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:9px;
+  padding:12px 22px;background:color-mix(in srgb,var(--ground) 90%,transparent);
+  backdrop-filter:saturate(150%) blur(12px);border-bottom:1px solid var(--line);
+}
+.bar h1{margin:0;font-size:15px;font-weight:900;letter-spacing:-.02em}
+.bar .sub{font-size:11.5px;color:var(--ink-3)}
+.grow{flex:1}
+.page{padding:20px 22px 72px;max-width:1360px;width:100%}
+
+/* ------------------------------------------------------------------ 部品 */
 .btn{
   display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;
-  background:var(--raised);border:1px solid var(--border);border-radius:9px;
-  cursor:pointer;font-size:12.5px;font-weight:600;white-space:nowrap;
-  transition:background .15s,border-color .15s,transform .1s;
+  background:var(--panel);border:1px solid var(--line-2);border-radius:9px;
+  cursor:pointer;font-size:12.5px;font-weight:700;white-space:nowrap;
+  transition:border-color .14s,background .14s,transform .1s;
 }
-.btn:hover{border-color:var(--axis)}
+.btn:hover{border-color:var(--accent)}
 .btn:active{transform:translateY(1px)}
-.btn[disabled]{opacity:.55;cursor:not-allowed}
-.btn.primary{background:var(--series);border-color:transparent;color:#fff}
-.btn.icon{width:32px;padding:0;justify-content:center}
-select.btn{padding-right:8px;appearance:none;text-align:center}
-
-/* ---------------------------------------------------------------- レイアウト */
-.wrap{max-width:1280px;margin:0 auto;padding:20px 20px 80px}
-.card{
-  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
-  box-shadow:var(--shadow);
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn.pri{background:var(--accent);border-color:transparent;color:var(--accent-ink)}
+.btn.ic{width:32px;padding:0;justify-content:center}
+select.btn{appearance:none;padding-right:10px}
+.field{
+  height:32px;padding:0 11px;background:var(--panel);border:1px solid var(--line-2);
+  border-radius:9px;font-size:12.5px;min-width:170px;
 }
-.card-h{display:flex;align-items:baseline;gap:10px;padding:16px 18px 0}
-.card-h h2{margin:0;font-size:13.5px;font-weight:700;letter-spacing:-.01em}
-.card-h p{margin:0;font-size:11.5px;color:var(--muted)}
 
-/* ---------------------------------------------------------------- KPI */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
-.kpi{padding:14px 16px}
-.kpi .lab{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px}
-.kpi .val{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.15;margin-top:2px}
-.kpi .sub{font-size:11.5px;color:var(--muted)}
-.kpi.accent .val{color:var(--good)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow)}
+.sect{margin-bottom:22px}
+.sect-h{display:flex;align-items:baseline;gap:10px;margin:0 0 11px;padding:0 2px}
+.sect-h h2{margin:0;font-size:14px;font-weight:900;letter-spacing:-.01em}
+.sect-h p{margin:0;font-size:11.5px;color:var(--ink-3)}
 
-/* ---------------------------------------------------------------- 機会マップ */
-.map-card{margin-bottom:14px;overflow:hidden}
-.map-body{padding:6px 18px 14px}
-.map-legend{display:flex;flex-wrap:wrap;gap:14px;padding:0 18px 14px;font-size:11.5px;color:var(--ink-2)}
-.map-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px}
-.map-note{font-size:11px;color:var(--muted);padding:0 18px 14px}
-
-/* ---------------------------------------------------------------- フィルタ */
-.filters{
-  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
-  margin:0 0 12px; padding:10px 12px;
-  background:var(--surface);border:1px solid var(--border);border-radius:12px;
-}
-.tabs{display:flex;gap:3px;flex-wrap:wrap}
-.tab{
-  height:29px;padding:0 11px;border-radius:8px;border:1px solid transparent;
-  background:transparent;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink-2);
-  transition:background .15s,color .15s;
-}
-.tab:hover{background:var(--plane)}
-.tab[aria-selected="true"]{background:var(--series);color:#fff}
-.tab .n{opacity:.6;margin-left:4px;font-size:11px}
-.search{
-  height:30px;padding:0 10px;min-width:150px;flex:1;max-width:240px;
-  background:var(--plane);border:1px solid var(--border);border-radius:8px;font-size:12.5px;
-}
-.search:focus{outline:2px solid var(--series);outline-offset:-1px}
-
-/* ---------------------------------------------------------------- 一覧 */
-.rows{display:flex;flex-direction:column}
-.row{
-  display:grid; grid-template-columns:46px 96px 1fr 92px 82px 74px;
-  gap:12px; align-items:center; padding:13px 16px; cursor:pointer;
-  border-top:1px solid var(--border); transition:background .12s;
-}
-.row:first-child{border-top:none}
-.row:hover{background:var(--plane)}
-.row:focus-visible{outline:2px solid var(--series);outline-offset:-2px}
-.rank{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
-
-/* スコアメーター: 単一比率 -> 同一ランプのトラック */
-.meter{display:flex;flex-direction:column;gap:4px}
-.meter b{font-size:17px;font-weight:700;letter-spacing:-.02em;line-height:1}
-.meter .track{height:4px;border-radius:2px;background:var(--grid);overflow:hidden}
-.meter .fill{height:100%;border-radius:2px;background:var(--series);transition:width .4s cubic-bezier(.2,.8,.2,1)}
-
-.nm{min-width:0}
-.nm .t{font-weight:650;font-size:13.5px;letter-spacing:-.01em;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nm .why{font-size:11.5px;color:var(--muted);margin-top:2px;
-  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
-.chip{
-  display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;
+/* ステージ: 色は3クラスのみ。正確な段階は絵文字＋語＋形で伝える */
+.stage{display:inline-flex;align-items:center;gap:4px;height:21px;padding:0 8px;
   border-radius:999px;font-size:10.5px;font-weight:700;white-space:nowrap;
-  background:var(--plane);color:var(--ink-2);border:1px solid var(--border);
-}
-.stage{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;white-space:nowrap}
-.stage i{width:7px;height:7px;border-radius:50%;flex:none}
-.s-emerging{color:var(--good)} .s-emerging i{background:var(--good)}
-.s-rising{color:var(--series)} .s-rising i{background:var(--series)}
-.s-new{color:var(--violet)} .s-new i{background:var(--violet)}
-.s-stable{color:var(--muted)} .s-stable i{background:var(--muted)}
-.s-peaking{color:var(--warning)} .s-peaking i{background:var(--warning)}
-.s-declining{color:var(--critical)} .s-declining i{background:var(--critical)}
+  border:1px solid transparent}
+.stage.k-good{background:var(--good-wash);color:var(--good);border-color:var(--good)}
+.stage.k-warn{background:transparent;color:var(--serious);border-color:var(--serious)}
+.stage.k-bad{background:transparent;color:var(--critical);border-color:var(--critical)}
+.stage.k-flat{background:transparent;color:var(--ink-3);border-color:var(--line-2)}
 
-.num{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;font-weight:600}
-.num .cap{display:block;font-size:10px;color:var(--muted);font-weight:500;letter-spacing:.02em}
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:6px;
+  font-size:10.5px;font-weight:500;background:var(--panel-2);color:var(--ink-2);
+  border:1px solid var(--line)}
+.chip.tag{cursor:pointer}
+.chip.tag:hover{border-color:var(--accent);color:var(--accent)}
+
+.num{font-variant-numeric:tabular-nums}
 .up{color:var(--good)} .down{color:var(--critical)}
-.spark{display:block}
 
-/* ---------------------------------------------------------------- テーブル */
-.tablewrap{overflow-x:auto;padding:4px 0 8px}
-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px}
-th{text-align:left;font-size:10.5px;color:var(--muted);font-weight:700;letter-spacing:.03em;
-  padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
-td{padding:9px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+/* ---------------------------------------------------------------- 今日の一手 */
+.hero{
+  display:grid;grid-template-columns:1fr 340px;gap:0;overflow:hidden;
+  border:1px solid var(--line);border-radius:var(--r);background:var(--panel);
+  box-shadow:var(--shadow);margin-bottom:22px;
+}
+.hero-l{padding:22px 24px}
+.hero-eyebrow{display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:700;
+  color:var(--ink-3);letter-spacing:.09em;margin-bottom:9px}
+.hero-eyebrow .pulse{width:7px;height:7px;border-radius:50%;background:var(--good);
+  box-shadow:0 0 0 0 var(--good-wash);animation:pulse 2.4s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 var(--good-wash)}
+  70%{box-shadow:0 0 0 9px rgba(0,0,0,0)}100%{box-shadow:0 0 0 0 rgba(0,0,0,0)}}
+.hero h2{margin:0 0 6px;font-size:27px;font-weight:900;letter-spacing:-.03em;
+  line-height:1.28;text-wrap:balance}
+.hero .why{font-size:12.5px;color:var(--ink-2);margin-bottom:16px;max-width:62ch}
+.hero-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+.hstat .k{font-size:10px;font-weight:700;color:var(--ink-3);letter-spacing:.05em}
+.hstat .v{font-size:23px;font-weight:900;letter-spacing:-.025em;line-height:1.2}
+.hstat .s{font-size:10.5px;color:var(--ink-3)}
+.hero-tags{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.hero-tags .lab{font-size:10.5px;color:var(--ink-3);font-weight:700;margin-right:2px}
+.hero-r{background:var(--panel-2);border-left:1px solid var(--line);padding:16px}
+.hero-r .lab{font-size:10px;font-weight:700;color:var(--ink-3);letter-spacing:.06em;
+  margin-bottom:9px}
+.proof{display:flex;flex-direction:column;gap:8px}
+.proof a{display:flex;gap:9px;align-items:center;padding:7px;border-radius:9px;
+  border:1px solid transparent;transition:border-color .14s,background .14s}
+.proof a:hover{background:var(--panel);border-color:var(--line-2)}
+
+/* サムネイル: 画像が無い/読めない場合も破綻しない生成プレースホルダ */
+.thumb{position:relative;flex:none;border-radius:8px;overflow:hidden;
+  background:var(--panel-2);display:grid;place-items:center}
+/* プレースホルダを常に敷き、画像はその上に重ねる。
+   画像が読めない場合 (CSP・オフライン・URL失効) も崩れない。 */
+.thumb .ph{position:absolute;inset:0;display:grid;place-items:center;
+  font-weight:900;color:#fff;font-size:15px;letter-spacing:-.02em;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.thumb.sm{width:46px;height:62px}
+.thumb.md{width:100%;aspect-ratio:9/12}
+.thumb .dur{position:absolute;right:3px;bottom:3px;background:rgba(0,0,0,.72);
+  color:#fff;font-size:9.5px;font-weight:700;padding:1px 4px;border-radius:4px;
+  font-variant-numeric:tabular-nums}
+.proof .pmeta{min-width:0;flex:1}
+.proof .pt{font-size:11.5px;font-weight:500;line-height:1.4;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.proof .pv{font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+
+/* ---------------------------------------------------------------- 商品カード */
+.plist{display:flex;flex-direction:column;gap:9px}
+.prow{
+  /* 子要素は 5 つ (順位/本体/サムネ/指標/スコア)。カラム数を必ず一致させること。
+     不足すると最後の要素が次の行へ折り返し、行が異常に高くなる。 */
+  display:grid;grid-template-columns:36px minmax(0,1fr) 180px 168px 92px;
+  gap:16px;align-items:center;
+  padding:13px 16px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;cursor:pointer;transition:border-color .14s,transform .1s;
+}
+.prow:hover{border-color:var(--accent)}
+.prow:active{transform:translateY(1px)}
+.prank{font-size:19px;font-weight:900;color:var(--ink-3);text-align:center;
+  font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.prow.top .prank{color:var(--accent)}
+.pmain{min-width:0}
+.pname{font-size:15px;font-weight:700;letter-spacing:-.015em;margin-bottom:3px;
+  display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.pname .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.preason{font-size:11.5px;color:var(--ink-3);
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.pstrip{display:flex;gap:4px}
+.pstrip{overflow:hidden}
+.pstrip .thumb{width:40px;height:54px;flex:none}
+.pmetrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.pm{text-align:right}
+.pm .k{font-size:9.5px;color:var(--ink-3);font-weight:700;letter-spacing:.02em;
+  white-space:nowrap}
+.pm .v{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;
+  line-height:1.3;white-space:nowrap}
+.pscore{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.pscore b{font-size:22px;font-weight:900;letter-spacing:-.03em;line-height:1}
+.meter{width:100%;height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:2px;
+  transition:width .5s cubic-bezier(.2,.8,.2,1)}
+
+/* ---------------------------------------------------------------- 動画グリッド */
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:13px}
+.vcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  overflow:hidden;cursor:pointer;transition:border-color .14s,transform .12s}
+.vcard:hover{border-color:var(--accent);transform:translateY(-2px)}
+.vcard .thumb{border-radius:0}
+.vbody{padding:9px 11px 11px}
+.vtitle{font-size:12px;font-weight:500;line-height:1.45;height:2.9em;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-bottom:7px}
+/* 各項目は途中で折り返さない。日本語は単位の途中でも改行されるため
+   span ごとに nowrap を掛けないと「再/生」のように割れる。 */
+.vstats{display:flex;flex-wrap:wrap;gap:3px 9px;font-size:10.5px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;margin-bottom:7px}
+.vstats span{white-space:nowrap}
+.vstats b{font-weight:700;color:var(--ink);font-size:11.5px}
+.vfoot{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink-3);
+  border-top:1px solid var(--line);padding-top:7px}
+.vfoot .who{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.vbadge{position:absolute;left:6px;top:6px;background:var(--accent);color:var(--accent-ink);
+  font-size:9.5px;font-weight:900;padding:2px 6px;border-radius:5px;letter-spacing:.02em}
+
+/* ---------------------------------------------------------------- 一覧・表 */
+.simple{display:flex;flex-direction:column}
+.srow{display:grid;grid-template-columns:30px 1fr 90px 84px 76px;gap:12px;align-items:center;
+  padding:11px 15px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s}
+.srow:last-child{border-bottom:none}
+.srow:hover{background:var(--panel-2)}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:780px}
+th{text-align:left;font-size:10px;color:var(--ink-3);font-weight:700;letter-spacing:.05em;
+  padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
 tr:last-child td{border-bottom:none}
 th.r,td.r{text-align:right}
 
 /* ---------------------------------------------------------------- 詳細 */
-.scrim{position:fixed;inset:0;background:rgba(11,11,11,.34);z-index:60;
-  opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim{position:fixed;inset:0;background:rgba(10,9,8,.5);z-index:60;opacity:0;
+  pointer-events:none;transition:opacity .2s}
 .scrim.on{opacity:1;pointer-events:auto}
-.drawer{
-  position:fixed;top:0;right:0;bottom:0;width:min(560px,94vw);z-index:70;
-  background:var(--surface);border-left:1px solid var(--border);
-  transform:translateX(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1);
-  display:flex;flex-direction:column;
-}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(600px,96vw);z-index:70;
+  background:var(--panel);border-left:1px solid var(--line);
+  transform:translateX(100%);transition:transform .3s cubic-bezier(.2,.8,.2,1);
+  display:flex;flex-direction:column}
 .drawer.on{transform:none}
-.drawer-h{padding:18px 20px 14px;border-bottom:1px solid var(--border);
-  display:flex;align-items:flex-start;gap:12px}
-.drawer-h h3{margin:0;font-size:16px;font-weight:700;letter-spacing:-.02em}
-.drawer-b{padding:18px 20px 40px;overflow-y:auto;flex:1}
-.dsec{margin-bottom:22px}
-.dsec h4{margin:0 0 9px;font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.05em}
-/* 区切りはセル内側の影で描く。gap+背景色方式だと、最終行の余った
-   グリッド領域が枠色のまま残って「空のセル」に見えてしまうため。 */
-.mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));
-  background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.mgrid > div{padding:9px 11px;box-shadow:inset -1px -1px 0 var(--border)}
-.mgrid .k{font-size:10.5px;color:var(--muted);font-weight:600}
-.mgrid .v{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.dh{padding:18px 22px 15px;border-bottom:1px solid var(--line);display:flex;gap:12px;
+  align-items:flex-start}
+.dh h3{margin:0;font-size:18px;font-weight:900;letter-spacing:-.025em;line-height:1.3}
+.db{padding:18px 22px 48px;overflow-y:auto;flex:1}
+.dsec{margin-bottom:24px}
+.dsec h4{margin:0 0 10px;font-size:10px;color:var(--ink-3);font-weight:700;letter-spacing:.07em}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.mgrid > div{padding:10px 12px;box-shadow:inset -1px -1px 0 var(--line)}
+.mgrid .k{font-size:10px;color:var(--ink-3);font-weight:700}
+.mgrid .v{font-size:16px;font-weight:900;font-variant-numeric:tabular-nums;
+  letter-spacing:-.02em}
 .reasons{list-style:none;margin:0;padding:0}
-.reasons li{position:relative;padding:5px 0 5px 16px;font-size:12.5px;color:var(--ink-2);
-  border-bottom:1px solid var(--border)}
+.reasons li{position:relative;padding:7px 0 7px 17px;font-size:12.5px;color:var(--ink-2);
+  border-bottom:1px solid var(--line)}
 .reasons li:last-child{border-bottom:none}
-.reasons li::before{content:"";position:absolute;left:2px;top:13px;
-  width:5px;height:5px;border-radius:50%;background:var(--series)}
+.reasons li::before{content:"";position:absolute;left:2px;top:15px;width:5px;height:5px;
+  border-radius:50%;background:var(--accent)}
 
 /* ---------------------------------------------------------------- チャート */
 .chart{width:100%;display:block;touch-action:none}
-.tip{
-  position:fixed;z-index:90;pointer-events:none;opacity:0;transition:opacity .12s;
-  background:var(--raised);border:1px solid var(--border);border-radius:9px;
-  box-shadow:var(--shadow);padding:8px 10px;font-size:11.5px;max-width:250px;
-}
+.tip{position:fixed;z-index:90;pointer-events:none;opacity:0;transition:opacity .12s;
+  background:var(--panel);border:1px solid var(--line-2);border-radius:9px;
+  box-shadow:var(--shadow);padding:9px 11px;font-size:11.5px;max-width:270px}
 .tip.on{opacity:1}
 .tip b{display:block;font-size:12.5px;margin-bottom:2px}
-.tip .r{color:var(--muted)}
+.tip .r{color:var(--ink-3)}
 
-/* ---------------------------------------------------------------- 状態 */
-.empty{padding:52px 20px;text-align:center;color:var(--muted)}
-.empty h3{margin:0 0 6px;font-size:15px;color:var(--ink)}
-.empty code{background:var(--plane);padding:2px 7px;border-radius:5px;font-size:12px;
-  border:1px solid var(--border)}
-.banner{
-  display:flex;gap:10px;align-items:flex-start;padding:11px 14px;margin-bottom:14px;
-  background:var(--surface);border:1px solid var(--border);
-  border-left:3px solid var(--warning);border-radius:10px;font-size:12px;color:var(--ink-2);
-}
-.toast{
-  position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);z-index:95;
-  background:var(--ink);color:var(--surface);padding:9px 16px;border-radius:999px;
-  font-size:12.5px;font-weight:600;opacity:0;transition:all .22s;pointer-events:none;
-}
+/* ---------------------------------------------------------------- 状態表示 */
+.empty{padding:64px 20px;text-align:center;color:var(--ink-3)}
+.empty h3{margin:0 0 7px;font-size:16px;color:var(--ink);font-weight:700}
+.empty code{background:var(--panel-2);padding:2px 7px;border-radius:5px;
+  border:1px solid var(--line);font-size:12px}
+.note{display:flex;gap:11px;padding:13px 16px;margin-bottom:18px;background:var(--panel);
+  border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:11px;
+  font-size:12.5px;color:var(--ink-2);line-height:1.7}
+.note b{color:var(--ink)}
+.note code{background:var(--panel-2);padding:1px 6px;border-radius:5px;
+  border:1px solid var(--line);font-size:11.5px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);z-index:95;
+  background:var(--ink);color:var(--ground);padding:10px 18px;border-radius:999px;
+  font-size:12.5px;font-weight:700;opacity:0;transition:all .22s;pointer-events:none}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .loading{opacity:.45;transition:opacity .15s}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-
-@media (max-width:640px){
-  /* 狭い画面では日時ラベルがヘッダーを何行にも押し広げるので隠す */
-  .brand small{display:none}
-  .kpis{grid-template-columns:repeat(2,1fr)}
+@media (max-width:1100px){
+  .hero{grid-template-columns:1fr}
+  .hero-r{border-left:none;border-top:1px solid var(--line)}
+  .prow{grid-template-columns:30px 1fr 132px}
+  .prow .pstrip{display:none}
 }
-@media (max-width:860px){
-  .row{grid-template-columns:34px 74px 1fr 76px;gap:9px}
-  .row .hide-s{display:none}
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  .rail{position:static;height:auto;flex-direction:row;overflow-x:auto;
+    border-right:none;border-bottom:1px solid var(--line);padding:10px}
+  .mark,.navlabel,.railfoot,.nav .n{display:none}
+  .nav{width:auto;white-space:nowrap}
+  .page{padding:16px 14px 60px}
+  .hero-stats{grid-template-columns:repeat(2,1fr)}
+  .prow{grid-template-columns:26px 1fr 96px}
+  .prow .pmetrics{display:none}
   .drawer{width:100vw}
 }
-@media (prefers-reduced-motion:reduce){
-  *{transition:none!important;animation:none!important}
-}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
+<div class="shell">
+  <nav class="rail" aria-label="メニュー">
+    <div class="mark"><span class="dot"></span>ttradar</div>
+    <div class="navlabel">判断する</div>
+    <button class="nav" data-view="today"><span class="ic">◎</span>今日の一手</button>
+    <button class="nav" data-view="products"><span class="ic">▤</span>商品<span class="n" id="nProducts"></span></button>
+    <div class="navlabel">根拠を見る</div>
+    <button class="nav" data-view="videos"><span class="ic">▶</span>動画<span class="n" id="nVideos"></span></button>
+    <button class="nav" data-view="hashtags"><span class="ic">#</span>ハッシュタグ<span class="n" id="nTags"></span></button>
+    <button class="nav" data-view="creators"><span class="ic">◍</span>クリエイター<span class="n" id="nCreators"></span></button>
+    <div class="navlabel">俯瞰する</div>
+    <button class="nav" data-view="map"><span class="ic">✥</span>機会マップ</button>
+    <div class="railfoot" id="railfoot"></div>
+  </nav>
 
-<header class="top">
-  <div class="top-in">
-    <div class="brand"><span class="dot"></span>ttradar
-      <small id="regionLabel">JP</small>
-    </div>
-    <div class="spacer"></div>
-    <div class="ctl">
-      <select class="btn" id="windowSel" title="伸び率を測る比較窓">
+  <div class="main">
+    <header class="bar">
+      <div>
+        <h1 id="viewTitle">今日の一手</h1>
+        <div class="sub" id="viewSub"></div>
+      </div>
+      <div class="grow"></div>
+      <select class="btn" id="windowSel" title="伸び率を測る比較窓" aria-label="比較窓">
         <option value="24">24時間</option>
         <option value="48">48時間</option>
         <option value="72" selected>72時間</option>
         <option value="168">7日間</option>
       </select>
       <button class="btn" id="collectBtn">収集する</button>
-      <button class="btn icon" id="themeBtn" title="テーマ切替" aria-label="テーマ切替">◐</button>
-    </div>
+      <button class="btn ic" id="themeBtn" title="テーマ切替" aria-label="テーマ切替">◐</button>
+    </header>
+    <div class="page" id="page"></div>
   </div>
-</header>
-
-<main class="wrap">
-  <div id="banner"></div>
-
-  <section class="kpis" id="kpis" aria-label="サマリー"></section>
-
-  <section class="card map-card" id="mapCard">
-    <div class="card-h">
-      <h2>機会マップ</h2>
-      <p>横軸 = 競合の多さ ／ 縦軸 = 日次の伸び率 ／ 円の大きさ = スコア</p>
-    </div>
-    <div class="map-body"><svg id="scatter" class="chart" role="img"
-      aria-label="競合の少なさと伸び率の散布図"></svg></div>
-    <div class="map-legend">
-      <span><i style="background:var(--series)"></i>狙い目（競合が少なく伸びている）</span>
-      <span><i style="background:var(--deemph)"></i>その他</span>
-    </div>
-    <div class="map-note" id="mapNote"></div>
-  </section>
-
-  <div class="filters">
-    <div class="tabs" id="typeTabs" role="tablist" aria-label="種別"></div>
-    <select class="btn" id="stageSel" aria-label="ステージで絞る"></select>
-    <input class="search" id="q" type="search" placeholder="名前・カテゴリで検索" aria-label="検索">
-    <div class="spacer"></div>
-    <button class="btn" id="viewBtn" aria-pressed="false">表形式</button>
-  </div>
-
-  <section class="card" id="listCard"><div class="rows" id="rows"></div></section>
-</main>
+</div>
 
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" tabindex="-1">
-  <div class="drawer-h">
+  <div class="dh">
     <div style="flex:1;min-width:0">
       <h3 id="dTitle">—</h3>
-      <div id="dMeta" style="font-size:11.5px;color:var(--muted);margin-top:3px"></div>
+      <div id="dMeta" style="font-size:11.5px;color:var(--ink-3);margin-top:4px"></div>
     </div>
-    <button class="btn icon" id="closeBtn" aria-label="閉じる">✕</button>
+    <button class="btn ic" id="closeBtn" aria-label="閉じる">✕</button>
   </div>
-  <div class="drawer-b" id="dBody"></div>
+  <div class="db" id="dBody"></div>
 </aside>
 
 <div class="tip" id="tip" role="status"></div>
 <div class="toast" id="toast"></div>
-
 <script>
 "use strict";
 /* ================================================================
-   ttradar フロントエンド
-   外部依存なし。チャートは全て素の SVG を組み立てている。
+   ttradar — 商品紹介トレンド
+   外部ライブラリ無し。チャートは素の SVG。
    ================================================================ */
 
 const S = {
-  window: 72, type: "all", stage: "all", q: "",
-  view: "cards", rows: [], summary: null, meta: null, jobTimer: null,
+  view:"today", window:72, sort:"views", q:"",
+  meta:null, summary:null, products:[], videos:[], tags:[], creators:[],
+  jobTimer:null, lastJob:0, tableMode:false,
 };
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
-  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const $  = (id)=>document.getElementById(id);
+const esc=(s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
+  '"':"&quot;","'":"&#39;"}[c]));
 
 /* ------------------------------------------------------------------ 書式 */
-function fmtNum(v){
-  if(v===null||v===undefined||Number.isNaN(v)) return "—";
-  const n=Number(v);
-  if(Math.abs(n)>=1e8) return (n/1e8).toFixed(1)+"億";
-  if(Math.abs(n)>=1e4) return (n/1e4).toFixed(1)+"万";
-  if(Math.abs(n)>=1000) return n.toLocaleString("ja-JP",{maximumFractionDigits:0});
-  return n.toLocaleString("ja-JP",{maximumFractionDigits:n<10?1:0});
+function n(v){
+  if(v===null||v===undefined||Number.isNaN(v))return"—";
+  const x=Number(v);
+  if(Math.abs(x)>=1e8)return(x/1e8).toFixed(1)+"億";
+  if(Math.abs(x)>=1e4)return(x/1e4).toFixed(1)+"万";
+  if(Math.abs(x)>=1000)return x.toLocaleString("ja-JP",{maximumFractionDigits:0});
+  return x.toLocaleString("ja-JP",{maximumFractionDigits:x<10?1:0});
 }
-function fmtPct(v){
-  if(v===null||v===undefined||Number.isNaN(v)) return "—";
-  return (v>=0?"+":"")+Math.round(v*100)+"%";
+function pct(v,d){ if(v===null||v===undefined||Number.isNaN(v))return"—";
+  return (v>=0?"+":"")+(v*100).toFixed(d??0)+"%"; }
+function rate(v,d){ if(v===null||v===undefined||Number.isNaN(v))return"—";
+  return (v*100).toFixed(d??1)+"%"; }
+function ago(h){
+  if(h===null||h===undefined)return"—";
+  if(h<1)return"数分前"; if(h<24)return Math.round(h)+"時間前";
+  const d=Math.round(h/24); return d<30?d+"日前":Math.round(d/30)+"ヶ月前";
 }
-function fmtTime(ts){
-  if(!ts) return "—";
-  const d=new Date(ts*1000);
-  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-}
-const TYPE_JA={product:"商品",hashtag:"ハッシュタグ",keyword:"キーワード",
-  song:"楽曲",video:"動画",creator:"クリエイター"};
+function dur(sec){ if(!sec)return""; const m=Math.floor(sec/60),s=Math.round(sec%60);
+  return m+":"+String(s).padStart(2,"0"); }
+function when(ts){ if(!ts)return"—"; const d=new Date(ts*1000);
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; }
+
+const TYPE_JA={product:"商品",hashtag:"ハッシュタグ",keyword:"キーワード",song:"楽曲",
+  video:"動画",creator:"クリエイター"};
 const METRIC_JA={views:"再生数",posts:"投稿数",likes:"いいね",comments:"コメント",
-  shares:"シェア",followers:"フォロワー",sales:"販売数",revenue:"売上",price:"価格",
-  rating:"評価",commission_rate:"報酬率",related_videos:"競合動画数",
-  related_creators:"関連クリエイター",search_volume:"検索ボリューム",rank:"順位",
-  ctr:"CTR",engagement_rate:"エンゲージ率"};
+  shares:"シェア",saves:"保存",followers:"フォロワー",sales:"販売数",revenue:"売上",
+  price:"価格",rating:"評価",commission_rate:"報酬率",related_videos:"紹介動画数",
+  related_creators:"投稿者数",search_volume:"検索数",ctr:"CTR",
+  engagement_rate:"エンゲージ率",save_rate:"保存率",duration:"長さ",
+  video_count:"紹介動画数",creator_count:"投稿者数",total_views:"合計再生",
+  median_views:"中央値再生",age_hours:"経過時間",velocity:"時速",hit_rate:"再現性"};
 function fmtMetric(k,v){
-  if(k==="commission_rate"||k==="ctr"||k==="engagement_rate") return Math.round(v*1000)/10+"%";
-  if(k==="price") return "¥"+fmtNum(v);
-  if(k==="rating") return Number(v).toFixed(1);
-  return fmtNum(v);
+  if(["commission_rate","ctr","engagement_rate","save_rate","hit_rate"].includes(k))return rate(v);
+  if(k==="price")return"¥"+n(v);
+  if(k==="rating")return Number(v).toFixed(1);
+  if(k==="duration")return Math.round(v)+"秒";
+  if(k==="age_hours")return ago(v);
+  return n(v);
+}
+/* ステージは色を3クラスに縮約。正確な段階は絵文字＋語が伝える */
+function stageClass(st){
+  if(st==="emerging"||st==="rising"||st==="new")return"k-good";
+  if(st==="peaking")return"k-warn";
+  if(st==="declining")return"k-bad";
+  return"k-flat";
+}
+function stageBadge(r){
+  return `<span class="stage ${stageClass(r.stage)}">${r.stage_emoji} ${esc(r.stage_label)}</span>`;
+}
+
+/* サムネイル: 画像が無くても意味のある見た目になるよう色を名前から決定 */
+function hue(str){ let h=0; for(let i=0;i<String(str).length;i++)
+  h=(h*31+String(str).charCodeAt(i))%360; return h; }
+function thumb(cls,name,img,durationSec,badge){
+  // 実サムネイルが無い/読めない場合の代替。文字を出すと商品名と紛らわしいので、
+  // 「動画である」ことだけを示す記号にして、色を名前から決めて識別性を持たせる。
+  const hh=hue(name||"?");
+  const ph=`<div class="ph" style="background:linear-gradient(150deg,
+    hsl(${hh} 34% 38%),hsl(${(hh+42)%360} 36% 22%));font-size:13px;opacity:.9">▶</div>`;
+  const im=img?`<img src="${esc(img)}" alt="" loading="lazy">`:"";
+  const dv=durationSec?`<span class="dur">${dur(durationSec)}</span>`:"";
+  const bd=badge?`<span class="vbadge">${esc(badge)}</span>`:"";
+  return `<div class="thumb ${cls}">${ph}${im}${dv}${bd}</div>`;
 }
 
 /* ------------------------------------------------------------------ 通信 */
 async function api(path){
-  const r=await fetch(path,{headers:{"Accept":"application/json"}});
-  if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error || r.statusText);
+  const r=await fetch(path,{headers:{Accept:"application/json"}});
+  if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.statusText);
   return r.json();
 }
 async function post(path,body){
@@ -382,550 +487,635 @@ async function post(path,body){
     body:JSON.stringify(body||{})});
   return r.json();
 }
-function toast(msg){
-  const t=$("toast"); t.textContent=msg; t.classList.add("on");
-  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("on"),2600);
-}
+function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("on");
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("on"),2800); }
 
-/* ------------------------------------------------------------------ 描画: KPI */
-function renderKpi(){
-  const s=S.summary; if(!s) return;
-  const c=s.stage_counts||{};
-  const tiles=[
-    {lab:"追跡中", val:s.total_entities, sub:`${s.capture_rounds} 回の収集`},
-    {lab:"🚀 伸び始め", val:c.emerging||0, sub:"今すぐ狙える", accent:(c.emerging||0)>0},
-    {lab:"📈 上昇中", val:c.rising||0, sub:"まだ間に合う"},
-    {lab:"要チェック", val:s.alerts, sub:`スコア ${Math.round(s.alert_threshold)} 以上`},
-  ];
-  $("kpis").innerHTML=tiles.map(t=>`
-    <div class="card kpi${t.accent?" accent":""}">
-      <div class="lab">${esc(t.lab)}</div>
-      <div class="val">${t.val}</div>
-      <div class="sub">${esc(t.sub)}</div>
-    </div>`).join("");
-  $("regionLabel").textContent=s.region+" · 最終収集 "+fmtTime(s.last_capture);
-}
-
-/* ------------------------------------------------------------------ 描画: 銘柄バナー */
-function renderBanner(){
-  const s=S.summary; const b=$("banner");
-  if(!s){b.innerHTML="";return;}
-  if(s.total_entities===0){b.innerHTML="";return;}
-  if(s.capture_rounds<2){
-    b.innerHTML=`<div class="banner"><span>⏳</span><div>
-      <b>まだ履歴が 1 回分しかありません。</b>
-      伸び率は前回との差分で計算するため、現時点では「今の順位」しか出せません。
-      時間を空けて数回「収集する」を押すと、伸び率・加速度・ステージ判定が有効になります。
-    </div></div>`;
-  } else if(s.insufficient_history>0){
-    b.innerHTML=`<div class="banner"><span>ℹ️</span><div>
-      ${s.insufficient_history} 件は履歴が不足しており伸び率を計算できていません。収集を重ねると精度が上がります。
-    </div></div>`;
-  } else b.innerHTML="";
-}
-
-/* ------------------------------------------------------------------ SVG 補助 */
-const SVGNS="http://www.w3.org/2000/svg";
-
-/* 目盛りをきりの良い数値にする (1/2/2.5/5 × 10^n).
-   生の min/max を等分すると 6,526 のような読みにくい値になるため。 */
-function niceTicks(lo,hi,count){
-  if(!(hi>lo)) return [lo];
-  const raw=(hi-lo)/Math.max(1,count);
-  const mag=Math.pow(10,Math.floor(Math.log10(raw)));
-  const norm=raw/mag;
-  const step=(norm<=1?1:norm<=2?2:norm<=2.5?2.5:norm<=5?5:10)*mag;
-  const start=Math.ceil(lo/step)*step;
-  const out=[];
-  for(let v=start; v<=hi+step*1e-9; v+=step) out.push(Math.abs(v)<step*1e-9?0:v);
-  return out.length?out:[lo,hi];
-}
+/* ------------------------------------------------------------------ SVG */
+const NS="http://www.w3.org/2000/svg";
 function el(name,attrs,parent){
-  const n=document.createElementNS(SVGNS,name);
-  for(const k in attrs) if(attrs[k]!==null&&attrs[k]!==undefined) n.setAttribute(k,attrs[k]);
-  if(parent) parent.appendChild(n);
-  return n;
+  const e=document.createElementNS(NS,name);
+  for(const k in attrs) if(attrs[k]!==null&&attrs[k]!==undefined)e.setAttribute(k,attrs[k]);
+  if(parent)parent.appendChild(e); return e;
 }
-function cssv(name){
-  return getComputedStyle(document.body).getPropertyValue(name).trim();
+function cssv(v){ return getComputedStyle(document.body).getPropertyValue(v).trim(); }
+function niceTicks(lo,hi,count){
+  if(!(hi>lo))return[lo];
+  const raw=(hi-lo)/Math.max(1,count);
+  const mag=Math.pow(10,Math.floor(Math.log10(raw))), nm=raw/mag;
+  const step=(nm<=1?1:nm<=2?2:nm<=2.5?2.5:nm<=5?5:10)*mag;
+  const out=[]; for(let v=Math.ceil(lo/step)*step; v<=hi+step*1e-9; v+=step)
+    out.push(Math.abs(v)<step*1e-9?0:v);
+  return out.length?out:[lo,hi];
 }
 function showTip(html,x,y){
   const t=$("tip"); t.innerHTML=html; t.classList.add("on");
   const r=t.getBoundingClientRect();
-  let left=x+14, top=y-r.height-12;
-  if(left+r.width>innerWidth-8) left=x-r.width-14;
-  if(top<8) top=y+16;
-  t.style.left=left+"px"; t.style.top=top+"px";
+  let l=x+14,tp=y-r.height-12;
+  if(l+r.width>innerWidth-8)l=x-r.width-14;
+  if(tp<8)tp=y+18;
+  t.style.left=l+"px"; t.style.top=tp+"px";
 }
 function hideTip(){ $("tip").classList.remove("on"); }
 
-/* ------------------------------------------------------------------ 機会マップ
-   形式: 散布図。強調(emphasis)で「狙い目」象限だけを主系列色、他は減色。
-   カテゴリ配色を使わないので CVD 上の対立ペアが発生しない。       */
-function renderScatter(){
-  const svg=$("scatter");
-  svg.innerHTML="";
-  const pts=S.rows.filter(r=>{
-    const c=competitionOf(r);
-    return c!==null && r.growth_rate!==null && r.growth_rate!==undefined;
-  });
-  const excluded=S.rows.length-pts.length;
-  $("mapNote").textContent = pts.length
-    ? (excluded>0 ? `${excluded} 件は競合数が不明のため未表示です。` : "")
-    : "競合数と伸び率の両方が揃ったデータがまだありません。収集を重ねると表示されます。";
-  if(!pts.length){ svg.style.height="0px"; $("mapCard").style.display=S.rows.length?"":"none"; return; }
-  $("mapCard").style.display="";
-
-  const W=svg.clientWidth||900, H=320;
-  const m={t:18,r:18,b:42,l:62};
-  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
-  svg.style.height=H+"px";
-
-  // x は競合数。桁が大きく違うので log スケール
-  const xs=pts.map(p=>Math.max(1,competitionOf(p)));
-  const ys=pts.map(p=>dailyOf(p));
-  const xMin=Math.log10(Math.min(...xs)), xMaxR=Math.log10(Math.max(...xs));
-  const xMax=xMaxR-xMin<0.3?xMin+0.3:xMaxR;
-  const yLo=Math.min(0,Math.min(...ys)), yHiR=Math.max(...ys);
-  const yHi=yHiR-yLo<0.1?yLo+0.1:yHiR;
-  const pad=(yHi-yLo)*0.12;
-
-  const X=v=>m.l+(Math.log10(Math.max(1,v))-xMin)/(xMax-xMin||1)*(W-m.l-m.r);
-  const Y=v=>H-m.b-((v-(yLo-pad))/((yHi+pad)-(yLo-pad)||1))*(H-m.t-m.b);
-
-  const grid=cssv("--grid"), axis=cssv("--axis"), muted=cssv("--muted");
-  const series=cssv("--series"), deemph=cssv("--deemph"), surface=cssv("--surface");
-
-  // 中央値で象限を割る
-  const sorted=[...xs].sort((a,b)=>a-b);
-  const xMed=sorted[Math.floor(sorted.length/2)];
-
-  // 狙い目ゾーンの淡い下地
-  el("rect",{x:m.l,y:m.t,width:Math.max(0,X(xMed)-m.l),height:Math.max(0,Y(0)-m.t),
-    fill:"var(--series-wash)"},svg);
-  const zoneLabel=el("text",{x:m.l+8,y:m.t+15,"font-size":10.5,"font-weight":700,
-    fill:series,opacity:.85},svg);
-  zoneLabel.textContent="狙い目ゾーン";
-  // ラベル同士の衝突を避けるため、置いた矩形を覚えておく
-  const placed=[{x1:m.l+4,y1:m.t+4,x2:m.l+76,y2:m.t+20}];
-  const hits=(b)=>placed.some(p=>!(b.x2<p.x1||b.x1>p.x2||b.y2<p.y1||b.y1>p.y2));
-
-  // グリッド: 実線ヘアライン
-  for(const v of niceTicks(yLo-pad,yHi+pad,4)){
-    const y=Y(v);
-    el("line",{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:grid,"stroke-width":1},svg);
-    el("text",{x:m.l-8,y:y+3.5,"text-anchor":"end","font-size":10,fill:muted},svg)
-      .textContent=Math.round(v*100)+"%";
-  }
-  // 0% ライン (基準)
-  el("line",{x1:m.l,y1:Y(0),x2:W-m.r,y2:Y(0),stroke:axis,"stroke-width":1},svg);
-  // 競合の中央値ライン
-  el("line",{x1:X(xMed),y1:m.t,x2:X(xMed),y2:H-m.b,stroke:axis,"stroke-width":1},svg);
-
-  // x 軸 (log の目盛りをきりの良い値で)
-  for(let e=0;e<=6;e++){
-    const v=Math.pow(10,e);
-    if(Math.log10(v)<xMin-0.05||Math.log10(v)>xMax+0.05) continue;
-    el("text",{x:X(v),y:H-m.b+16,"text-anchor":"middle","font-size":10,fill:muted},svg)
-      .textContent=fmtNum(v);
-  }
-  el("text",{x:(m.l+W-m.r)/2,y:H-4,"text-anchor":"middle","font-size":10.5,fill:muted},svg)
-    .textContent="競合の多さ（関連動画・クリエイター数、対数スケール）";
-  el("text",{"font-size":10.5,fill:muted,"text-anchor":"middle",
-    transform:`translate(14 ${(m.t+(H-m.b))/2}) rotate(-90)`},svg)
-    .textContent="日次の伸び率";
-
-  // マーク: 面積をスコアに比例させる (半径ではなく面積)
-  pts.sort((a,b)=>a.score-b.score);
-  for(const p of pts){
-    const c=competitionOf(p), g=dailyOf(p);
-    const hot = c<=xMed && g>0;
-    const r=4+Math.sqrt(Math.max(0,p.score)/100)*7;
-    const g1=el("g",{},svg);
-    // 2px の面色リングで重なりでも判別できるようにする
-    el("circle",{cx:X(c),cy:Y(g),r:r,fill:hot?series:deemph,
-      stroke:surface,"stroke-width":2,opacity:hot?1:.65},g1);
-    // 当たり判定はマークより大きく (最小 24px 相当)
-    const hit=el("circle",{cx:X(c),cy:Y(g),r:Math.max(r+6,12),fill:"transparent",
-      style:"cursor:pointer"},g1);
-    hit.addEventListener("mouseenter",ev=>showTip(
-      `<b>${esc(p.name)}</b>
-       <div class="r">${TYPE_JA[p.entity_type]||p.entity_type} · ${p.stage_emoji} ${esc(p.stage_label)}</div>
-       <div class="r">スコア ${Math.round(p.score)} ／ 日次 ${fmtPct(g)} ／ 競合 ${fmtNum(c)}</div>`,
-      ev.clientX,ev.clientY));
-    hit.addEventListener("mouseleave",hideTip);
-    hit.addEventListener("click",()=>openDetail(p.entity_key));
-  }
-  // 直接ラベルは上位数件のみ。全点に付けると読めなくなるうえ、
-  // はみ出し・重なりが起きるので、収まる場合だけ描画する。
-  const top=[...pts].sort((a,b)=>b.score-a.score).slice(0,4);
-  for(const p of top){
-    const c=competitionOf(p), g=dailyOf(p);
-    const r=4+Math.sqrt(Math.max(0,p.score)/100)*7;
-    const label=p.name.length>13?p.name.slice(0,12)+"…":p.name;
-    const wpx=label.length*7.2;           // 日本語込みの概算幅
-    let tx=X(c), ty=Y(g)-r-7;
-    let anchor="middle";
-    // 上に置けなければ下へ
-    if(ty<m.t+11){ ty=Y(g)+r+13; }
-    if(ty>H-m.b-2) continue;
-    // 左右のはみ出しを内側に寄せる
-    if(tx-wpx/2<m.l+2){ tx=m.l+2; anchor="start"; }
-    else if(tx+wpx/2>W-m.r-2){ tx=W-m.r-2; anchor="end"; }
-    const x1=anchor==="start"?tx:anchor==="end"?tx-wpx:tx-wpx/2;
-    const box={x1,y1:ty-10,x2:x1+wpx,y2:ty+3};
-    if(hits(box)) continue;               // 重なるなら諦める (ツールチップで読める)
-    placed.push(box);
-    const t=el("text",{x:tx,y:ty,"text-anchor":anchor,"font-size":10.5,
-      "font-weight":700,fill:cssv("--ink-2")},svg);
-    t.textContent=label;
-  }
+function spark(vals,w,h){
+  w=w||70; h=h||24;
+  if(!vals||vals.length<2)return`<svg width="${w}" height="${h}"></svg>`;
+  const p=2,lo=Math.min(...vals),hi=Math.max(...vals),rg=(hi-lo)||1;
+  const pts=vals.map((v,i)=>[p+(i/(vals.length-1))*(w-p*2),h-p-((v-lo)/rg)*(h-p*2)]);
+  const d=pts.map((q,i)=>(i?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1)).join(" ");
+  const last=pts[pts.length-1];
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <path d="${d} L ${last[0].toFixed(1)} ${h-p} L ${pts[0][0].toFixed(1)} ${h-p} Z"
+      fill="var(--accent-wash)"/>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6"
+      fill="var(--accent)" stroke="var(--panel)" stroke-width="2"/></svg>`;
 }
+
+/* ================================================================ ビュー */
+
+const VIEWS = {
+  today:    {title:"今日の一手",   sub:"実際に伸びている紹介動画から、今撮るべき商品を決める"},
+  products: {title:"商品",         sub:"紹介動画の成績から算出。クリックで根拠を表示"},
+  videos:   {title:"動画",         sub:"いま伸びている商品紹介動画そのもの"},
+  hashtags: {title:"ハッシュタグ", sub:"伸びている紹介動画が実際に使っているタグ"},
+  creators: {title:"クリエイター", sub:"同じジャンルで結果を出している投稿者"},
+  map:      {title:"機会マップ",   sub:"競合の少なさ × 伸び率。左上が狙い目"},
+};
+
+function setView(v){
+  S.view=v;
+  document.querySelectorAll(".nav").forEach(b=>
+    b.setAttribute("aria-current", b.dataset.view===v?"page":"false"));
+  $("viewTitle").textContent=VIEWS[v].title;
+  $("viewSub").textContent=VIEWS[v].sub;
+  render();
+}
+
+function render(){
+  const p=$("page");
+  if(!S.summary){ p.innerHTML=`<div class="empty">読み込み中…</div>`; return; }
+  if(S.summary.total_entities===0){
+    p.innerHTML=emptyState(); wire(); return;
+  }
+  const banner = S.summary.capture_rounds<2 ? `<div class="note"><span>⏳</span><div>
+      <b>まだ 1 回しか収集していません。</b>
+      伸び率は前回との差分で出すため、今は「現在の順位」しか分かりません。
+      <code>--interval</code> を付けて起動するか「収集する」を数回押すと、
+      伸び率・加速度・ステージ判定が有効になります。</div></div>` : "";
+  p.innerHTML = banner + ({
+    today:viewToday, products:viewProducts, videos:viewVideos,
+    hashtags:viewTags, creators:viewCreators, map:viewMap,
+  }[S.view])();
+  wire();
+  if(S.view==="map") drawScatter();
+}
+
+function emptyState(){
+  return `<div class="empty">
+    <h3>まだデータがありません</h3>
+    <p>「収集する」を押すか、ターミナルで <code>ttradar collect</code> を実行してください。<br>
+    自動で貯めるなら <code>ttradar serve --interval 120 --collect-now</code>。</p>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- 今日の一手 */
+function viewToday(){
+  const top=S.products[0];
+  if(!top) return `<div class="empty"><h3>商品がまだ抽出できていません</h3>
+    <p>商品リンク付きの紹介動画が集まると、ここに「今撮るべき商品」が出ます。</p></div>`;
+  const m=top.metrics||{}, e=top.extra||{};
+  const vids=(e.top_videos||[]).slice(0,3);
+  const tags=(e.hashtags||[]).slice(0,7);
+
+  const hero=`<div class="hero">
+    <div class="hero-l">
+      <div class="hero-eyebrow"><span class="pulse"></span>今いちばん撮る価値がある商品</div>
+      <h2>${esc(top.name)}</h2>
+      <div class="why">${esc((top.reasons||[]).slice(0,3).join(" ／ "))}</div>
+      <div class="hero-stats">
+        <div class="hstat"><div class="k">中央値再生</div>
+          <div class="v">${n(m.median_views)}</div>
+          <div class="s">代表的な1本の伸び</div></div>
+        <div class="hstat"><div class="k">保存率</div>
+          <div class="v">${rate(m.save_rate)}</div>
+          <div class="s">購買意欲の強さ</div></div>
+        <div class="hstat"><div class="k">紹介動画</div>
+          <div class="v">${n(m.video_count)}<span style="font-size:13px">本</span></div>
+          <div class="s">投稿者 ${n(m.creator_count)} 人</div></div>
+        <div class="hstat"><div class="k">再現性</div>
+          <div class="v">${rate(m.hit_rate,0)}</div>
+          <div class="s">平均超えの割合</div></div>
+      </div>
+      <div class="hero-tags"><span class="lab">使うタグ</span>
+        ${tags.map(t=>`<button class="chip tag" data-tag="${esc(t.tag)}">#${esc(t.tag)}</button>`).join("")}
+      </div>
+    </div>
+    <div class="hero-r">
+      <div class="lab">根拠になった動画</div>
+      <div class="proof">
+        ${vids.map(v=>`<a href="${esc(v.url||"#")}" target="_blank" rel="noopener">
+          ${thumb("sm",v.name||top.name,v.thumbnail,null,null)}
+          <div class="pmeta">
+            <div class="pt">${esc(v.name||"")}</div>
+            <div class="pv">${n(v.views)}再生 ・ ${rate(v.engagement_rate)} ・ @${esc(v.creator||"")}</div>
+          </div></a>`).join("") || '<div class="pv">動画データがありません</div>'}
+      </div>
+    </div>
+  </div>`;
+
+  const runners=S.products.slice(1,6);
+  const next=`<div class="sect">
+    <div class="sect-h"><h2>次点</h2><p>スコア順の 2〜6 位</p></div>
+    <div class="plist">${runners.map((r,i)=>productRow(r,i+2)).join("")}</div>
+  </div>`;
+
+  const hot=S.videos.slice(0,6);
+  const feed=`<div class="sect">
+    <div class="sect-h"><h2>いま伸びている動画</h2><p>時速（再生数÷経過時間）が高い順</p></div>
+    <div class="vgrid">${hot.map(videoCard).join("")}</div>
+  </div>`;
+  return hero+next+feed;
+}
+
+/* ---------------------------------------------------------------- 商品 */
+function productRow(r,rank){
+  const m=r.metrics||{}, e=r.extra||{};
+  const strip=(e.top_videos||[]).slice(0,4)
+    .map(v=>thumb("",v.name||r.name,v.thumbnail,null,null)).join("");
+  return `<div class="prow${rank<=3?" top":""}" data-key="${esc(r.entity_key)}"
+      tabindex="0" role="button" aria-label="${esc(r.name)} スコア${Math.round(r.score)}">
+    <div class="prank">${rank}</div>
+    <div class="pmain">
+      <div class="pname"><span class="t">${esc(r.name)}</span>${stageBadge(r)}
+        ${r.category?`<span class="chip">${esc(r.category)}</span>`:""}</div>
+      <div class="preason">${esc((r.reasons||[]).slice(0,2).join(" ／ "))}</div>
+    </div>
+    <div class="pstrip">${strip}</div>
+    <div class="pmetrics">
+      <div class="pm"><div class="k">中央値</div><div class="v">${n(m.median_views)}</div></div>
+      <div class="pm"><div class="k">保存率</div><div class="v">${rate(m.save_rate)}</div></div>
+      <div class="pm"><div class="k">動画数</div><div class="v">${n(m.video_count)}</div></div>
+    </div>
+    <div class="pscore"><b>${Math.round(r.score)}</b>
+      <div class="meter"><i style="width:${Math.max(3,Math.round(r.score))}%"></i></div>
+      <span style="font-size:10px;color:var(--ink-3)">${r.growth_rate!==null&&r.growth_rate!==undefined
+        ? `<span class="${r.growth_rate>0?"up":r.growth_rate<0?"down":""}">${pct(r.growth_rate)}</span>` : "履歴待ち"}</span>
+    </div>
+  </div>`;
+}
+function viewProducts(){
+  if(!S.products.length)return `<div class="empty"><h3>商品がまだありません</h3>
+    <p>商品リンク付きの紹介動画が集まると抽出されます。</p></div>`;
+  const toggle=`<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+    <input class="field" id="q" type="search" placeholder="商品名で絞り込み"
+      value="${esc(S.q)}" aria-label="検索">
+    <div class="grow" style="flex:1"></div>
+    <button class="btn" id="tableBtn" aria-pressed="${S.tableMode}">${S.tableMode?"カード表示":"表で見る"}</button>
+  </div>`;
+  const rows=S.products.filter(r=>!S.q||r.name.toLowerCase().includes(S.q.toLowerCase()));
+  if(S.tableMode) return toggle+productTable(rows);
+  return toggle+`<div class="plist">${rows.map((r,i)=>productRow(r,i+1)).join("")}</div>`;
+}
+function productTable(rows){
+  return `<div class="card tablewrap"><table>
+    <thead><tr><th>#</th><th>商品</th><th>状態</th><th class="r">スコア</th>
+      <th class="r">中央値再生</th><th class="r">合計再生</th><th class="r">保存率</th>
+      <th class="r">再現性</th><th class="r">動画数</th><th class="r">投稿者</th>
+      <th class="r">伸び率</th><th>根拠</th></tr></thead>
+    <tbody>${rows.map((r,i)=>{const m=r.metrics||{};return `<tr>
+      <td>${i+1}</td><td>${esc(r.name)}</td>
+      <td>${r.stage_emoji} ${esc(r.stage_label)}</td>
+      <td class="r">${Math.round(r.score)}</td>
+      <td class="r">${n(m.median_views)}</td><td class="r">${n(m.total_views)}</td>
+      <td class="r">${rate(m.save_rate)}</td><td class="r">${rate(m.hit_rate,0)}</td>
+      <td class="r">${n(m.video_count)}</td><td class="r">${n(m.creator_count)}</td>
+      <td class="r">${pct(r.growth_rate)}</td>
+      <td>${esc((r.reasons||[]).join(" ／ "))}</td></tr>`;}).join("")}</tbody>
+  </table></div>`;
+}
+
+/* ---------------------------------------------------------------- 動画 */
+function videoCard(r){
+  const m=r.metrics||{}, e=r.extra||{};
+  const badge=(m.age_hours!==undefined&&m.age_hours<48)?"NEW":null;
+  return `<div class="vcard" data-key="${esc(r.entity_key)}" tabindex="0" role="button">
+    ${thumb("md",r.name,r.thumbnail,m.duration,badge)}
+    <div class="vbody">
+      <div class="vtitle">${esc(r.name)}</div>
+      <div class="vstats">
+        <span><b>${n(m.views)}</b> 再生</span>
+        <span>♥ <b>${n(m.likes)}</b></span>
+        <span>保存 <b>${rate(m.save_rate)}</b></span>
+      </div>
+      <div class="vfoot"><span class="who">@${esc(e.creator||"")}</span>
+        <span>${ago(m.age_hours)}</span></div>
+    </div>
+  </div>`;
+}
+const SORTS=[["views","再生数"],["velocity","時速（伸びの速さ）"],["save_rate","保存率"],
+  ["engagement","エンゲージ率"],["likes","いいね"],["recent","新着順"]];
+function viewVideos(){
+  const ctl=`<div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+    <select class="btn" id="sortSel" aria-label="並び順">
+      ${SORTS.map(([v,l])=>`<option value="${v}"${S.sort===v?" selected":""}>${l}</option>`).join("")}
+    </select>
+    <input class="field" id="q" type="search" placeholder="キャプション・投稿者・タグで検索"
+      value="${esc(S.q)}" aria-label="検索">
+    <span style="font-size:11.5px;color:var(--ink-3)">${S.videos.length} 本</span>
+  </div>`;
+  if(!S.videos.length)return ctl+`<div class="empty"><h3>動画がありません</h3></div>`;
+  return ctl+`<div class="vgrid">${S.videos.map(videoCard).join("")}</div>`;
+}
+
+/* ---------------------------------------------------------------- タグ / 人 */
+function simpleRow(r,i,valueLabel,valueFn){
+  const m=r.metrics||{};
+  return `<div class="srow" data-key="${esc(r.entity_key)}" tabindex="0" role="button">
+    <div style="color:var(--ink-3);font-size:12px" class="num">${i}</div>
+    <div style="min-width:0">
+      <div style="font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis">${esc(r.name)} ${stageBadge(r)}</div>
+      <div style="font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis">${esc((r.reasons||[]).slice(0,2).join(" ／ "))}</div>
+    </div>
+    <div style="text-align:right"><div style="font-size:9.5px;color:var(--ink-3);font-weight:700">${valueLabel}</div>
+      <div class="num" style="font-weight:700">${valueFn(m)}</div></div>
+    <div style="text-align:right"><div style="font-size:9.5px;color:var(--ink-3);font-weight:700">伸び率</div>
+      <div class="num ${r.growth_rate>0?"up":r.growth_rate<0?"down":""}"
+        style="font-weight:700">${pct(r.growth_rate)}</div></div>
+    <div>${spark(r.spark,72,24)}</div>
+  </div>`;
+}
+function viewTags(){
+  if(!S.tags.length)return `<div class="empty"><h3>タグがまだありません</h3></div>`;
+  return `<div class="card simple">${S.tags.map((r,i)=>
+    simpleRow(r,i+1,"動画数",m=>n(m.video_count||m.posts))).join("")}</div>`;
+}
+function viewCreators(){
+  if(!S.creators.length)return `<div class="empty"><h3>クリエイターがまだいません</h3></div>`;
+  return `<div class="card simple">${S.creators.map((r,i)=>
+    simpleRow(r,i+1,"合計再生",m=>n(m.total_views||m.views))).join("")}</div>`;
+}
+
+/* ---------------------------------------------------------------- マップ */
+function viewMap(){
+  return `<div class="card" style="padding:16px 18px 14px">
+    <svg id="scatter" class="chart" role="img"
+      aria-label="競合の少なさと伸び率の散布図"></svg>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;
+      color:var(--ink-2);margin-top:10px">
+      <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;
+        background:var(--accent);margin-right:5px"></i>狙い目（競合が少なく伸びている）</span>
+      <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;
+        background:var(--deemph);margin-right:5px"></i>その他</span>
+    </div>
+    <div id="mapNote" style="font-size:11px;color:var(--ink-3);margin-top:6px"></div>
+  </div>
+  <div class="sect" style="margin-top:20px">
+    <div class="sect-h"><h2>表で見る</h2><p>色に頼らない同じ内容</p></div>
+    ${productTable(S.products)}
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- 散布図
+   単一系列＋減色の「強調」表現。カテゴリ配色を使わないので
+   色覚上の識別問題が原理的に発生しない。                              */
 function competitionOf(r){
   const m=r.metrics||{};
-  const v=(m.related_videos!==undefined)?m.related_videos:m.related_creators;
+  const v=(m.video_count!==undefined)?m.video_count
+        :(m.related_videos!==undefined)?m.related_videos:m.related_creators;
   return (v===undefined||v===null)?null:Number(v);
 }
 function dailyOf(r){
-  if(r.growth_rate===null||r.growth_rate===undefined) return 0;
+  if(r.growth_rate===null||r.growth_rate===undefined)return 0;
   const h=r.window_hours||S.window||24;
   return r.growth_rate*(24/Math.max(h,1));
 }
-
-/* ------------------------------------------------------------------ スパークライン */
-function sparkSVG(vals){
-  if(!vals||vals.length<2) return `<svg class="spark" width="62" height="22"></svg>`;
-  const w=62,h=22,p=2;
-  const lo=Math.min(...vals), hi=Math.max(...vals), rng=(hi-lo)||1;
-  const pts=vals.map((v,i)=>{
-    const x=p+(i/(vals.length-1))*(w-p*2);
-    const y=h-p-((v-lo)/rng)*(h-p*2);
-    return [x,y];
-  });
-  const d=pts.map((q,i)=>(i?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1)).join(" ");
-  const area=`${d} L ${pts[pts.length-1][0].toFixed(1)} ${h-p} L ${pts[0][0].toFixed(1)} ${h-p} Z`;
-  const last=pts[pts.length-1];
-  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
-    <path d="${area}" fill="var(--series-wash)"/>
-    <path d="${d}" fill="none" stroke="var(--series)" stroke-width="2"
-      stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6"
-      fill="var(--series)" stroke="var(--surface)" stroke-width="2"/>
-  </svg>`;
-}
-
-/* ------------------------------------------------------------------ 一覧 */
-function renderList(){
-  const host=$("rows");
-  if(!S.rows.length){
-    host.innerHTML=`<div class="empty">
-      <h3>${S.summary&&S.summary.total_entities?"条件に合うものがありません":"まだデータがありません"}</h3>
-      <p>${S.summary&&S.summary.total_entities
-        ? "フィルタを変えてみてください。"
-        : 'ヘッダーの「収集する」を押すか、ターミナルで <code>ttradar collect</code> を実行してください。'}</p>
-    </div>`;
-    return;
-  }
-  if(S.view==="table") return renderTable();
-
-  host.innerHTML=S.rows.map((r,i)=>{
-    const isP=r.entity_type==="product";
-    const m=r.metrics||{};
-    const gr=r.growth_rate;
-    return `<div class="row" tabindex="0" role="button" data-key="${esc(r.entity_key)}"
-      aria-label="${esc(r.name)} スコア ${Math.round(r.score)}">
-      <div class="rank">${i+1}</div>
-      <div class="meter">
-        <b>${Math.round(r.score)}</b>
-        <div class="track"><div class="fill" style="width:${Math.max(2,Math.round(r.score))}%"></div></div>
-        <span class="stage s-${r.stage}"><i></i>${esc(r.stage_label)}</span>
-      </div>
-      <div class="nm">
-        <div class="t">${esc(r.name)}
-          ${r.category?`<span class="chip">${esc(r.category)}</span>`:""}
-          ${r.is_new?`<span class="chip">NEW</span>`:""}
-        </div>
-        <div class="why">${esc((r.reasons||[]).slice(0,2).join(" ／ "))}</div>
-      </div>
-      <div class="num hide-s">${sparkSVG(r.spark)}<span class="cap">推移</span></div>
-      <div class="num ${gr>0?"up":gr<0?"down":""}">${fmtPct(gr)}<span class="cap">伸び率</span></div>
-      <div class="num hide-s">${isP
-          ? (m.related_videos!==undefined?fmtNum(m.related_videos):"—")+'<span class="cap">競合</span>'
-          : fmtNum(r.current_value)+'<span class="cap">現在</span>'}</div>
-    </div>`;
-  }).join("");
-
-  host.querySelectorAll(".row").forEach(n=>{
-    n.addEventListener("click",()=>openDetail(n.dataset.key));
-    n.addEventListener("keydown",e=>{
-      if(e.key==="Enter"||e.key===" "){e.preventDefault();openDetail(n.dataset.key);}
-    });
-  });
-}
-
-/* テーブルビュー: 色に依存しない等価表現 (アクセシビリティ要件) */
-function renderTable(){
-  $("rows").innerHTML=`<div class="tablewrap"><table>
-    <thead><tr>
-      <th>#</th><th>名前</th><th>種別</th><th>ステージ</th>
-      <th class="r">スコア</th><th class="r">現在</th><th class="r">伸び率</th>
-      <th class="r">競合</th><th class="r">報酬率</th><th>根拠</th>
-    </tr></thead><tbody>
-    ${S.rows.map((r,i)=>{
-      const m=r.metrics||{};
-      return `<tr>
-        <td>${i+1}</td>
-        <td>${r.url?`<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`:esc(r.name)}</td>
-        <td>${esc(TYPE_JA[r.entity_type]||r.entity_type)}</td>
-        <td>${r.stage_emoji} ${esc(r.stage_label)}</td>
-        <td class="r">${Math.round(r.score)}</td>
-        <td class="r">${fmtNum(r.current_value)}</td>
-        <td class="r">${fmtPct(r.growth_rate)}</td>
-        <td class="r">${m.related_videos!==undefined?fmtNum(m.related_videos):"—"}</td>
-        <td class="r">${m.commission_rate!==undefined?Math.round(m.commission_rate*100)+"%":"—"}</td>
-        <td>${esc((r.reasons||[]).join(" ／ "))}</td>
-      </tr>`;}).join("")}
-    </tbody></table></div>`;
-}
-
-/* ------------------------------------------------------------------ 詳細 */
-async function openDetail(key){
-  const row=S.rows.find(r=>r.entity_key===key);
-  $("scrim").classList.add("on"); $("drawer").classList.add("on");
-  $("drawer").focus();
-  $("dTitle").textContent=row?row.name:"読み込み中…";
-  $("dMeta").textContent=row?`${TYPE_JA[row.entity_type]||row.entity_type}${row.category?" · "+row.category:""}`:"";
-  $("dBody").innerHTML=`<div class="empty">読み込み中…</div>`;
-  try{
-    const h=await api("/api/history?key="+encodeURIComponent(key));
-    renderDetail(row,h);
-  }catch(e){
-    $("dBody").innerHTML=`<div class="empty"><h3>読み込めませんでした</h3><p>${esc(e.message)}</p></div>`;
-  }
-}
-function closeDetail(){
-  $("scrim").classList.remove("on"); $("drawer").classList.remove("on"); hideTip();
-}
-function renderDetail(row,h){
-  const series=h.series.filter(p=>p.v!==null);
-  const metrics=(series.length?series[series.length-1].metrics:{})||{};
-  const mEntries=Object.entries(metrics).filter(([k,v])=>v!==null&&v!==undefined&&k!=="rank");
-
-  $("dBody").innerHTML=`
-    <div class="dsec">
-      <h4>推移（${series.length} 回の観測）</h4>
-      <svg id="dChart" class="chart" role="img" aria-label="時系列推移"></svg>
-      <div id="dChartNote" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
-    </div>
-    ${row?`<div class="dsec"><h4>評価</h4>
-      <div class="mgrid">
-        <div><div class="k">スコア</div><div class="v">${Math.round(row.score)}</div></div>
-        <div><div class="k">ステージ</div><div class="v" style="font-size:13px">${row.stage_emoji} ${esc(row.stage_label)}</div></div>
-        <div><div class="k">伸び率</div><div class="v">${fmtPct(row.growth_rate)}</div></div>
-        <div><div class="k">日次換算</div><div class="v">${fmtPct(dailyOf(row))}</div></div>
-      </div></div>`:""}
-    ${mEntries.length?`<div class="dsec"><h4>指標</h4><div class="mgrid">
-      ${mEntries.map(([k,v])=>`<div><div class="k">${esc(METRIC_JA[k]||k)}</div>
-        <div class="v">${esc(fmtMetric(k,v))}</div></div>`).join("")}
-    </div></div>`:""}
-    ${row&&row.reasons&&row.reasons.length?`<div class="dsec"><h4>スコアの根拠</h4>
-      <ul class="reasons">${row.reasons.map(r=>`<li>${esc(r)}</li>`).join("")}</ul></div>`:""}
-    <div class="dsec">
-      <h4>データ</h4>
-      <div style="font-size:12px;color:var(--ink-2)">
-        初回検出: ${fmtTime(h.first_seen)}<br>
-        観測回数: ${series.length} 回
-        ${h.url?`<br><a href="${esc(h.url)}" target="_blank" rel="noopener">TikTok で開く ↗</a>`:""}
-      </div>
-    </div>`;
-  drawDetailChart(series);
-}
-
-/* 詳細チャート: 単一系列なので凡例は不要 (見出しが何かを示している).
-   十字カーソル + ツールチップを既定で付ける。                       */
-function drawDetailChart(series){
-  const svg=$("dChart");
+function drawScatter(){
+  const svg=$("scatter"); if(!svg)return;
   svg.innerHTML="";
-  const note=$("dChartNote");
-  if(series.length<2){
-    svg.style.height="0px";
-    note.textContent="観測が 1 回のみのため推移を描画できません。収集を重ねると表示されます。";
-    return;
-  }
-  note.textContent="";
-  const W=svg.clientWidth||480, H=190, m={t:12,r:14,b:26,l:52};
+  const pts=S.products.filter(r=>competitionOf(r)!==null
+    && r.growth_rate!==null && r.growth_rate!==undefined);
+  const note=$("mapNote");
+  if(!pts.length){ svg.style.height="0px";
+    if(note)note.textContent="競合数と伸び率の両方が揃ったデータがまだありません。収集を重ねると表示されます。";
+    return; }
+  const excluded=S.products.length-pts.length;
+  if(note)note.textContent=excluded>0?`${excluded} 件は伸び率が未計算のため未表示です。`:"";
+
+  const W=svg.clientWidth||900,H=340,m={t:20,r:20,b:44,l:64};
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.style.height=H+"px";
 
-  const ts=series.map(p=>p.t), vs=series.map(p=>p.v);
-  const t0=Math.min(...ts), t1=Math.max(...ts);
-  const lo=Math.min(...vs), hi=Math.max(...vs);
+  const xs=pts.map(p=>Math.max(1,competitionOf(p))), ys=pts.map(dailyOf);
+  const xMin=Math.log10(Math.min(...xs)); let xMax=Math.log10(Math.max(...xs));
+  if(xMax-xMin<0.3)xMax=xMin+0.3;
+  const yLo=Math.min(0,...ys); let yHi=Math.max(...ys);
+  if(yHi-yLo<0.1)yHi=yLo+0.1;
+  const pad=(yHi-yLo)*0.14;
+  const X=v=>m.l+(Math.log10(Math.max(1,v))-xMin)/((xMax-xMin)||1)*(W-m.l-m.r);
+  const Y=v=>H-m.b-((v-(yLo-pad))/(((yHi+pad)-(yLo-pad))||1))*(H-m.t-m.b);
+
+  const grid=cssv("--grid"),axis=cssv("--axis"),muted=cssv("--ink-3");
+  const acc=cssv("--accent"),de=cssv("--deemph"),panel=cssv("--panel");
+  const sorted=[...xs].sort((a,b)=>a-b), xMed=sorted[Math.floor(sorted.length/2)];
+
+  el("rect",{x:m.l,y:m.t,width:Math.max(0,X(xMed)-m.l),
+    height:Math.max(0,Y(0)-m.t),fill:"var(--accent-wash)"},svg);
+  const zl=el("text",{x:m.l+9,y:m.t+15,"font-size":10.5,"font-weight":700,
+    fill:acc},svg); zl.textContent="狙い目ゾーン";
+  const placed=[{x1:m.l+5,y1:m.t+3,x2:m.l+80,y2:m.t+20}];
+  const hits=b=>placed.some(p=>!(b.x2<p.x1||b.x1>p.x2||b.y2<p.y1||b.y1>p.y2));
+
+  for(const v of niceTicks(yLo-pad,yHi+pad,4)){
+    const y=Y(v);
+    el("line",{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:grid,"stroke-width":1},svg);
+    el("text",{x:m.l-9,y:y+3.5,"text-anchor":"end","font-size":10,fill:muted},svg)
+      .textContent=Math.round(v*100)+"%";
+  }
+  el("line",{x1:m.l,y1:Y(0),x2:W-m.r,y2:Y(0),stroke:axis,"stroke-width":1},svg);
+  el("line",{x1:X(xMed),y1:m.t,x2:X(xMed),y2:H-m.b,stroke:axis,"stroke-width":1},svg);
+  for(let e2=0;e2<=6;e2++){
+    const v=Math.pow(10,e2);
+    if(Math.log10(v)<xMin-0.05||Math.log10(v)>xMax+0.05)continue;
+    el("text",{x:X(v),y:H-m.b+17,"text-anchor":"middle","font-size":10,fill:muted},svg)
+      .textContent=n(v);
+  }
+  el("text",{x:(m.l+W-m.r)/2,y:H-6,"text-anchor":"middle","font-size":10.5,fill:muted},svg)
+    .textContent="紹介動画の本数（対数スケール）";
+  el("text",{"font-size":10.5,fill:muted,"text-anchor":"middle",
+    transform:`translate(15 ${(m.t+(H-m.b))/2}) rotate(-90)`},svg)
+    .textContent="日次の伸び率";
+
+  [...pts].sort((a,b)=>a.score-b.score).forEach(p=>{
+    const c=competitionOf(p),g=dailyOf(p);
+    const hot=c<=xMed&&g>0;
+    const r=5+Math.sqrt(Math.max(0,p.score)/100)*8;
+    const gg=el("g",{},svg);
+    el("circle",{cx:X(c),cy:Y(g),r,fill:hot?acc:de,stroke:panel,"stroke-width":2,
+      opacity:hot?1:.7},gg);
+    const hit=el("circle",{cx:X(c),cy:Y(g),r:Math.max(r+7,13),fill:"transparent",
+      style:"cursor:pointer"},gg);
+    hit.addEventListener("mouseenter",ev=>showTip(
+      `<b>${esc(p.name)}</b><div class="r">${p.stage_emoji} ${esc(p.stage_label)} ・ スコア ${Math.round(p.score)}</div>
+       <div class="r">日次 ${pct(g)} ／ 紹介動画 ${n(c)}本 ／ 中央値 ${n((p.metrics||{}).median_views)}再生</div>`,
+      ev.clientX,ev.clientY));
+    hit.addEventListener("mouseleave",hideTip);
+    hit.addEventListener("click",()=>openDetail(p.entity_key));
+  });
+  [...pts].sort((a,b)=>b.score-a.score).slice(0,4).forEach(p=>{
+    const c=competitionOf(p),g=dailyOf(p);
+    const r=5+Math.sqrt(Math.max(0,p.score)/100)*8;
+    const lab=p.name.length>13?p.name.slice(0,12)+"…":p.name;
+    const w=lab.length*7.4; let tx=X(c),ty=Y(g)-r-8,an="middle";
+    if(ty<m.t+12)ty=Y(g)+r+14;
+    if(ty>H-m.b-2)return;
+    if(tx-w/2<m.l+2){tx=m.l+2;an="start";}
+    else if(tx+w/2>W-m.r-2){tx=W-m.r-2;an="end";}
+    const x1=an==="start"?tx:an==="end"?tx-w:tx-w/2;
+    const box={x1,y1:ty-10,x2:x1+w,y2:ty+3};
+    if(hits(box))return;
+    placed.push(box);
+    el("text",{x:tx,y:ty,"text-anchor":an,"font-size":10.5,"font-weight":700,
+      fill:cssv("--ink-2")},svg).textContent=lab;
+  });
+}
+
+/* ---------------------------------------------------------------- 詳細 */
+async function openDetail(key){
+  const row=[...S.products,...S.videos,...S.tags,...S.creators]
+    .find(r=>r.entity_key===key);
+  $("scrim").classList.add("on"); $("drawer").classList.add("on"); $("drawer").focus();
+  $("dTitle").textContent=row?row.name:"読み込み中…";
+  $("dMeta").textContent=row?`${TYPE_JA[row.entity_type]||row.entity_type}${row.category?" ・ "+row.category:""}`:"";
+  $("dBody").innerHTML=`<div class="empty">読み込み中…</div>`;
+  try{ renderDetail(row, await api("/api/history?key="+encodeURIComponent(key))); }
+  catch(e){ $("dBody").innerHTML=`<div class="empty"><h3>読み込めませんでした</h3>
+    <p>${esc(e.message)}</p></div>`; }
+}
+function closeDetail(){ $("scrim").classList.remove("on");
+  $("drawer").classList.remove("on"); hideTip(); }
+
+function renderDetail(row,h){
+  const series=(h.series||[]).filter(p=>p.v!==null);
+  const met=(series.length?series[series.length-1].metrics:{})||{};
+  const skip=new Set(["rank","total_views","related_videos","related_creators"]);
+  const entries=Object.entries(met).filter(([k,v])=>v!==null&&v!==undefined&&!skip.has(k));
+  const e=row?(row.extra||{}):{};
+  const vids=(e.top_videos||[]).slice(0,5);
+  const tags=(e.hashtags||[]).slice(0,10);
+
+  $("dBody").innerHTML=`
+    <div class="dsec"><h4>推移（${series.length} 回の観測）</h4>
+      <svg id="dChart" class="chart" role="img" aria-label="時系列推移"></svg>
+      <div id="dNote" style="font-size:11px;color:var(--ink-3);margin-top:7px"></div></div>
+    ${row?`<div class="dsec"><h4>評価</h4><div class="mgrid">
+      <div><div class="k">スコア</div><div class="v">${Math.round(row.score)}</div></div>
+      <div><div class="k">ステージ</div><div class="v" style="font-size:13px">${row.stage_emoji} ${esc(row.stage_label)}</div></div>
+      <div><div class="k">伸び率</div><div class="v">${pct(row.growth_rate)}</div></div>
+      <div><div class="k">日次換算</div><div class="v">${pct(dailyOf(row))}</div></div>
+    </div></div>`:""}
+    ${vids.length?`<div class="dsec"><h4>この判断の根拠になった動画</h4>
+      <div class="proof">${vids.map(v=>`<a href="${esc(v.url||"#")}" target="_blank" rel="noopener">
+        ${thumb("sm",v.name||"",v.thumbnail,null,null)}
+        <div class="pmeta"><div class="pt">${esc(v.name||"")}</div>
+        <div class="pv">${n(v.views)}再生 ・ 保存${n(v.saves)} ・ @${esc(v.creator||"")} ・ ${ago(v.age_hours)}</div>
+        </div></a>`).join("")}</div></div>`:""}
+    ${tags.length?`<div class="dsec"><h4>よく一緒に使われているタグ</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+      ${tags.map(t=>`<span class="chip">#${esc(t.tag)} <span style="opacity:.55;margin-left:4px">${t.count}</span></span>`).join("")}
+      </div></div>`:""}
+    ${entries.length?`<div class="dsec"><h4>指標</h4><div class="mgrid">
+      ${entries.map(([k,v])=>`<div><div class="k">${esc(METRIC_JA[k]||k)}</div>
+        <div class="v">${esc(fmtMetric(k,v))}</div></div>`).join("")}</div></div>`:""}
+    ${row&&row.reasons&&row.reasons.length?`<div class="dsec"><h4>スコアの根拠</h4>
+      <ul class="reasons">${row.reasons.map(r=>`<li>${esc(r)}</li>`).join("")}</ul></div>`:""}
+    <div class="dsec"><h4>データ</h4>
+      <div style="font-size:12px;color:var(--ink-2)">初回検出: ${when(h.first_seen)}<br>
+      観測回数: ${series.length} 回
+      ${h.url?`<br><a style="color:var(--accent);font-weight:700"
+        href="${esc(h.url)}" target="_blank" rel="noopener">TikTok で開く ↗</a>`:""}</div></div>`;
+  drawDetail(series);
+}
+
+function drawDetail(series){
+  const svg=$("dChart"); if(!svg)return;
+  svg.innerHTML="";
+  const note=$("dNote");
+  if(series.length<2){ svg.style.height="0px";
+    if(note)note.textContent="観測が 1 回のみのため推移を描画できません。収集を重ねると表示されます。";
+    return; }
+  if(note)note.textContent="";
+  const W=svg.clientWidth||520,H=200,m={t:14,r:16,b:28,l:56};
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.style.height=H+"px";
+  const ts=series.map(p=>p.t),vs=series.map(p=>p.v);
+  const t0=Math.min(...ts),t1=Math.max(...ts);
+  const lo=Math.min(...vs),hi=Math.max(...vs);
   const span=(hi-lo)||Math.max(hi*0.1,1);
-  const yLo=Math.max(0,lo-span*0.15), yHi=hi+span*0.15;
+  const yLo=Math.max(0,lo-span*0.15),yHi=hi+span*0.15;
   const X=t=>m.l+((t-t0)/((t1-t0)||1))*(W-m.l-m.r);
   const Y=v=>H-m.b-((v-yLo)/((yHi-yLo)||1))*(H-m.t-m.b);
-
-  const grid=cssv("--grid"), muted=cssv("--muted"), series_c=cssv("--series");
+  const grid=cssv("--grid"),muted=cssv("--ink-3"),acc=cssv("--accent");
   for(const v of niceTicks(yLo,yHi,4)){
     const y=Y(v);
     el("line",{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:grid,"stroke-width":1},svg);
-    el("text",{x:m.l-8,y:y+3.5,"text-anchor":"end","font-size":10,fill:muted},svg)
-      .textContent=fmtNum(v);
+    el("text",{x:m.l-9,y:y+3.5,"text-anchor":"end","font-size":10,fill:muted},svg).textContent=n(v);
   }
   const pts=series.map(p=>[X(p.t),Y(p.v)]);
   const d=pts.map((q,i)=>(i?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1)).join(" ");
   el("path",{d:`${d} L ${pts[pts.length-1][0].toFixed(1)} ${H-m.b} L ${pts[0][0].toFixed(1)} ${H-m.b} Z`,
-    fill:"var(--series-wash)"},svg);
-  el("path",{d:d,fill:"none",stroke:series_c,"stroke-width":2,
-    "stroke-linejoin":"round","stroke-linecap":"round"},svg);
-
-  // 終端だけ直接ラベル (全点に数値を置かない)
+    fill:"var(--accent-wash)"},svg);
+  el("path",{d,fill:"none",stroke:acc,"stroke-width":2,"stroke-linejoin":"round",
+    "stroke-linecap":"round"},svg);
   const last=pts[pts.length-1];
-  el("circle",{cx:last[0],cy:last[1],r:4.5,fill:series_c,
-    stroke:cssv("--surface"),"stroke-width":2},svg);
-  el("text",{x:Math.min(last[0]+8,W-m.r-4),y:Math.max(last[1]-8,m.t+9),
-    "text-anchor":last[0]>W-70?"end":"start","font-size":11,"font-weight":700,
-    fill:cssv("--ink")},svg).textContent=fmtNum(series[series.length-1].v);
+  el("circle",{cx:last[0],cy:last[1],r:4.5,fill:acc,stroke:cssv("--panel"),"stroke-width":2},svg);
+  el("text",{x:Math.min(last[0]+9,W-m.r-4),y:Math.max(last[1]-9,m.t+10),
+    "text-anchor":last[0]>W-80?"end":"start","font-size":11,"font-weight":700,
+    fill:cssv("--ink")},svg).textContent=n(series[series.length-1].v);
+  el("text",{x:m.l,y:H-7,"font-size":10,fill:muted},svg).textContent=when(t0);
+  el("text",{x:W-m.r,y:H-7,"text-anchor":"end","font-size":10,fill:muted},svg).textContent=when(t1);
 
-  el("text",{x:m.l,y:H-6,"font-size":10,fill:muted},svg).textContent=fmtTime(t0);
-  el("text",{x:W-m.r,y:H-6,"text-anchor":"end","font-size":10,fill:muted},svg).textContent=fmtTime(t1);
-
-  // 十字カーソル
-  const cross=el("line",{y1:m.t,y2:H-m.b,stroke:cssv("--axis"),"stroke-width":1,
-    opacity:0},svg);
-  const dot=el("circle",{r:5,fill:series_c,stroke:cssv("--surface"),"stroke-width":2,
-    opacity:0},svg);
-  const hit=el("rect",{x:m.l,y:m.t,width:Math.max(0,W-m.l-m.r),height:Math.max(0,H-m.t-m.b),
-    fill:"transparent",style:"cursor:crosshair"},svg);
-  function move(ev){
-    const box=svg.getBoundingClientRect();
-    const px=(ev.clientX-box.left)*(W/box.width);
+  const cross=el("line",{y1:m.t,y2:H-m.b,stroke:cssv("--axis"),"stroke-width":1,opacity:0},svg);
+  const dot=el("circle",{r:5,fill:acc,stroke:cssv("--panel"),"stroke-width":2,opacity:0},svg);
+  const hit=el("rect",{x:m.l,y:m.t,width:Math.max(0,W-m.l-m.r),
+    height:Math.max(0,H-m.t-m.b),fill:"transparent",style:"cursor:crosshair"},svg);
+  hit.addEventListener("mousemove",ev=>{
+    const box=svg.getBoundingClientRect(), px=(ev.clientX-box.left)*(W/box.width);
     let best=0,bd=1e9;
     pts.forEach((q,i)=>{const dd=Math.abs(q[0]-px); if(dd<bd){bd=dd;best=i;}});
-    const q=pts[best], p=series[best];
+    const q=pts[best],p=series[best];
     cross.setAttribute("x1",q[0]); cross.setAttribute("x2",q[0]); cross.setAttribute("opacity",1);
     dot.setAttribute("cx",q[0]); dot.setAttribute("cy",q[1]); dot.setAttribute("opacity",1);
-    showTip(`<b>${fmtNum(p.v)}</b><div class="r">${fmtTime(p.t)}</div>`,ev.clientX,ev.clientY);
-  }
-  hit.addEventListener("mousemove",move);
-  hit.addEventListener("mouseleave",()=>{
-    cross.setAttribute("opacity",0); dot.setAttribute("opacity",0); hideTip();
+    showTip(`<b>${n(p.v)}</b><div class="r">${when(p.t)}</div>`,ev.clientX,ev.clientY);
   });
+  hit.addEventListener("mouseleave",()=>{cross.setAttribute("opacity",0);
+    dot.setAttribute("opacity",0); hideTip();});
 }
 
-/* ------------------------------------------------------------------ 読み込み */
-async function load(){
-  const host=$("listCard"); host.classList.add("loading");
+/* ---------------------------------------------------------------- 配線 */
+function wire(){
+  document.querySelectorAll(".prow,.vcard,.srow").forEach(el2=>{
+    const go=()=>openDetail(el2.dataset.key);
+    el2.addEventListener("click",go);
+    el2.addEventListener("keydown",ev=>{
+      if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();go();}});
+  });
+  document.querySelectorAll(".chip.tag").forEach(c=>
+    c.addEventListener("click",ev=>{ev.stopPropagation();
+      S.q=c.dataset.tag; S.sort="views"; setView("videos");}));
+  const q=$("q");
+  if(q){ let t=null;
+    q.addEventListener("input",ev=>{ clearTimeout(t);
+      t=setTimeout(()=>{S.q=ev.target.value.trim();
+        if(S.view==="videos")loadVideos().then(render); else render();
+        const f=$("q"); if(f){f.focus(); f.setSelectionRange(f.value.length,f.value.length);}
+      },260); }); }
+  const ss=$("sortSel");
+  if(ss)ss.addEventListener("change",ev=>{S.sort=ev.target.value;
+    loadVideos().then(render);});
+  const tb=$("tableBtn");
+  if(tb)tb.addEventListener("click",()=>{S.tableMode=!S.tableMode; render();});
+}
+
+/* ---------------------------------------------------------------- 読み込み */
+async function loadVideos(){
+  const qs=new URLSearchParams({window:S.window,sort:S.sort,q:S.q,limit:60});
+  try{ S.videos=(await api("/api/videos?"+qs)).rows; }
+  catch(e){ S.videos=[]; }
+  return S.videos;
+}
+async function loadAll(){
+  const page=$("page"); page.classList.add("loading");
   try{
-    const qs=new URLSearchParams({window:S.window,type:S.type,stage:S.stage,q:S.q});
-    const [sum,sig]=await Promise.all([
-      api("/api/summary?window="+S.window),
-      api("/api/signals?"+qs.toString()),
+    const w=S.window;
+    const [sum,prod,tags,cre]=await Promise.all([
+      api(`/api/summary?window=${w}`),
+      api(`/api/signals?window=${w}&type=product&limit=200`),
+      api(`/api/signals?window=${w}&type=hashtag&limit=80`),
+      api(`/api/signals?window=${w}&type=creator&limit=80`),
     ]);
-    S.summary=sum; S.rows=sig.rows;
-    renderKpi(); renderBanner(); renderTabs(); renderScatter(); renderList();
+    S.summary=sum; S.products=prod.rows; S.tags=tags.rows; S.creators=cre.rows;
+    S.sort = S.sort||"views";
+    await loadVideos();
+    $("nProducts").textContent=S.products.length||"";
+    $("nVideos").textContent=S.videos.length||"";
+    $("nTags").textContent=S.tags.length||"";
+    $("nCreators").textContent=S.creators.length||"";
+    const iv=S.job&&S.job.interval_min;
+    $("railfoot").innerHTML=
+      `${esc(sum.region)} ・ ${sum.total_entities} 件追跡中<br>`+
+      `最終収集 ${when(sum.last_capture)}<br>収集 ${sum.capture_rounds} 回`+
+      (iv?`<br>${iv} 分ごとに自動収集`:"");
+    render();
   }catch(e){
-    $("rows").innerHTML=`<div class="empty"><h3>読み込めませんでした</h3>
+    $("page").innerHTML=`<div class="empty"><h3>読み込めませんでした</h3>
       <p>${esc(e.message)}</p></div>`;
-  }finally{ host.classList.remove("loading"); }
-}
-
-function renderTabs(){
-  const counts=(S.summary&&S.summary.type_counts)||{};
-  const items=[{value:"all",label:"すべて"}].concat(
-    (S.meta.entity_types||[]).filter(t=>counts[t.value]));
-  $("typeTabs").innerHTML=items.map(t=>{
-    const n=t.value==="all"
-      ? Object.values(counts).reduce((a,b)=>a+b,0)
-      : counts[t.value];
-    return `<button class="tab" role="tab" data-v="${t.value}"
-      aria-selected="${S.type===t.value}">${esc(t.label)}<span class="n">${n||0}</span></button>`;
-  }).join("");
-  $("typeTabs").querySelectorAll(".tab").forEach(b=>{
-    b.addEventListener("click",()=>{S.type=b.dataset.v; load();});
-  });
-}
-
-/* ------------------------------------------------------------------ 初期化 */
-async function init(){
-  const saved=localStorage.getItem("ttradar-theme");
-  if(saved) document.documentElement.setAttribute("data-theme",saved);
-  try{ S.meta=await api("/api/meta"); }
-  catch(e){ S.meta={entity_types:[],stages:[]}; }
-
-  S.window=Number(S.meta.default_window)||72;
-  const ws=$("windowSel");
-  if(![...ws.options].some(o=>Number(o.value)===S.window)) S.window=72;
-  ws.value=String(S.window);
-
-  $("stageSel").innerHTML=`<option value="all">全ステージ</option>`+
-    (S.meta.stages||[]).map(s=>`<option value="${s.value}">${s.emoji} ${s.label}</option>`).join("");
-
-  ws.addEventListener("change",()=>{S.window=Number(ws.value); load();});
-  $("stageSel").addEventListener("change",e=>{S.stage=e.target.value; load();});
-
-  let qt=null;
-  $("q").addEventListener("input",e=>{
-    clearTimeout(qt); qt=setTimeout(()=>{S.q=e.target.value.trim(); load();},220);
-  });
-
-  $("viewBtn").addEventListener("click",()=>{
-    S.view=S.view==="cards"?"table":"cards";
-    $("viewBtn").textContent=S.view==="cards"?"表形式":"カード形式";
-    $("viewBtn").setAttribute("aria-pressed",S.view==="table");
-    renderList();
-  });
-
-  $("themeBtn").addEventListener("click",()=>{
-    const cur=document.documentElement.getAttribute("data-theme");
-    const next=cur==="dark"?"light":cur==="light"?"dark":
-      (matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark");
-    document.documentElement.setAttribute("data-theme",next);
-    localStorage.setItem("ttradar-theme",next);
-    renderScatter();
-  });
-
-  $("collectBtn").addEventListener("click",startCollect);
-  $("closeBtn").addEventListener("click",closeDetail);
-  $("scrim").addEventListener("click",closeDetail);
-  document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDetail(); });
-  addEventListener("resize",()=>{ clearTimeout(window._rz);
-    window._rz=setTimeout(renderScatter,180); });
-
-  await load();
-  pollJob();
+  }finally{ page.classList.remove("loading"); }
 }
 
 async function startCollect(){
-  const b=$("collectBtn");
-  b.disabled=true; b.textContent="収集中…";
+  const b=$("collectBtn"); b.disabled=true; b.textContent="収集中…";
   const r=await post("/api/collect");
-  if(!r.ok){ toast(r.reason||"収集を開始できませんでした"); }
+  if(!r.ok) toast(r.reason||"収集を開始できませんでした");
   pollJob();
 }
 async function pollJob(){
   clearTimeout(S.jobTimer);
-  let j;
-  try{ j=await api("/api/job"); }catch(e){ return; }
+  let j; try{ j=await api("/api/job"); }catch(e){ return; }
+  S.job=j;
   const b=$("collectBtn");
-  if(j.running){
-    b.disabled=true; b.textContent="収集中…";
-    S.jobTimer=setTimeout(pollJob,1200);
-    return;
-  }
+  if(j.running){ b.disabled=true; b.textContent="収集中…";
+    S.jobTimer=setTimeout(pollJob,1200); return; }
   b.disabled=false; b.textContent="収集する";
-  if(j.finished && j.finished>(S._lastJob||0)){
-    S._lastJob=j.finished;
+  if(j.finished&&j.finished>S.lastJob){
+    S.lastJob=j.finished;
     if(j.error) toast("収集に失敗: "+j.error);
     else if(j.result){
       const r=j.result;
       if(r.inserted>0) toast(`${r.inserted} 件を新規保存しました`);
       else if(r.errors&&r.errors.length) toast("取得できませんでした（doctor で確認）");
       else toast("新しいデータはありませんでした");
-      await load();
+      await loadAll();
     }
   }
+  // 自動収集が有効なら、次回実行を拾うために緩くポーリングを続ける
+  if(j.interval_min) S.jobTimer=setTimeout(pollJob,30000);
 }
 
+/* ---------------------------------------------------------------- 初期化 */
+async function init(){
+  const saved=localStorage.getItem("ttradar-theme");
+  if(saved)document.documentElement.setAttribute("data-theme",saved);
+
+  try{ S.meta=await api("/api/meta"); }catch(e){ S.meta={}; }
+  const ws=$("windowSel");
+  const dw=Number(S.meta.default_window)||72;
+  S.window=[...ws.options].some(o=>Number(o.value)===dw)?dw:72;
+  ws.value=String(S.window);
+  ws.addEventListener("change",()=>{S.window=Number(ws.value); loadAll();});
+
+  document.querySelectorAll(".nav").forEach(b=>
+    b.addEventListener("click",()=>{ S.q=""; setView(b.dataset.view); }));
+  $("collectBtn").addEventListener("click",startCollect);
+  $("closeBtn").addEventListener("click",closeDetail);
+  $("scrim").addEventListener("click",closeDetail);
+  document.addEventListener("keydown",ev=>{ if(ev.key==="Escape")closeDetail(); });
+  $("themeBtn").addEventListener("click",()=>{
+    const cur=document.documentElement.getAttribute("data-theme");
+    const next=cur==="dark"?"light":cur==="light"?"dark":
+      (matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark");
+    document.documentElement.setAttribute("data-theme",next);
+    localStorage.setItem("ttradar-theme",next);
+    if(S.view==="map")drawScatter();
+  });
+  addEventListener("resize",()=>{ clearTimeout(window._rz);
+    window._rz=setTimeout(()=>{ if(S.view==="map")drawScatter(); },200); });
+
+  setView("today");
+  await loadAll();
+  pollJob();
+}
 init();
 </script>
 </body>

@@ -7,6 +7,7 @@ import pytest
 from ttradar.analysis.digest import Radar
 from ttradar.analysis.metrics import compute_growth, classify_stage
 from ttradar.analysis.scoring import score_generic, score_product
+from ttradar.analysis.rollup import rollup_all
 from ttradar.collectors.demo import DemoCollector
 from ttradar.config import Config, ProductWeights, ScoreWeights
 from ttradar.db import Database
@@ -155,11 +156,17 @@ def test_noise_acceleration_does_not_beat_real_growth():
 
 # -------------------------------------------------------------------- 統合
 
+def _seed(cfg, db, days=7):
+    """本番と同じ経路でシードする: 動画を集め、rollup で商品等を導出する."""
+    for off in range(days, -1, -1):
+        vids = DemoCollector(cfg, day_offset=float(off)).collect("JP")
+        db.upsert_snapshots(vids + rollup_all(vids, "JP"))
+
+
 def test_full_pipeline_with_backfilled_history(cfg):
     """7 日分の履歴を入れて分析まで通ること."""
     db = Database(cfg.db_path)
-    for off in range(7, -1, -1):
-        db.upsert_snapshots(DemoCollector(cfg, day_offset=float(off)).collect("JP"))
+    _seed(cfg, db)
 
     digest = Radar(cfg, db).analyze(region="JP", window_hours=72)
     assert digest.total_entities > 0
@@ -174,6 +181,9 @@ def test_full_pipeline_with_backfilled_history(cfg):
     # 爆発的に伸びる商品が上位に来ること
     top_names = [s.name for s in products[:3]]
     assert any("毛玉取り器" in n or "温感アイマスク" in n for n in top_names)
+    # 動画からクリエイター・タグも導出されていること
+    assert digest.by_type.get(EntityType.CREATOR)
+    assert digest.by_type.get(EntityType.HASHTAG)
     db.close()
 
 
@@ -189,7 +199,8 @@ def test_analyze_on_empty_db_is_safe(cfg):
 def test_first_run_has_no_growth_but_does_not_crash(cfg):
     """初回実行は履歴が無いので伸び率が出ない. それでも落ちないこと."""
     db = Database(cfg.db_path)
-    db.upsert_snapshots(DemoCollector(cfg, day_offset=0).collect("JP"))
+    vids = DemoCollector(cfg, day_offset=0).collect("JP")
+    db.upsert_snapshots(vids + rollup_all(vids, "JP"))
     digest = Radar(cfg, db).analyze(region="JP")
     assert digest.total_entities > 0
     assert digest.insufficient_history > 0
@@ -217,12 +228,11 @@ def test_collector_failure_does_not_abort_run(cfg):
 def test_html_report_renders(cfg):
     from ttradar.report.html import build_html
     db = Database(cfg.db_path)
-    for off in (3, 2, 1, 0):
-        db.upsert_snapshots(DemoCollector(cfg, day_offset=float(off)).collect("JP"))
+    _seed(cfg, db, days=3)
     html = build_html(Radar(cfg, db).analyze(region="JP", window_hours=48))
     assert "<!doctype html>" in html.lower()
     assert "TikTok トレンドレーダー" in html
-    assert "商品 (TikTok Shop)" in html
+    assert "毛玉取り器" in html
     db.close()
 
 
