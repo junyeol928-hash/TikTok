@@ -5,6 +5,7 @@
     ttradar collect         トレンドを収集して DB に保存
     ttradar report          分析してランキング表示 / HTML 出力
     ttradar run             collect + report + notify (定期実行はこれ)
+    ttradar probe           TikTok から実際に何が返るか調べる (0件のとき用)
     ttradar serve           ブラウザで見るダッシュボードアプリを起動
     ttradar watch           追跡リスト (競合クリエイター等) の管理
     ttradar demo            オフラインのサンプルデータで一通り体験する
@@ -40,8 +41,9 @@ regions: [JP]                 # 対象国。US, GB なども可 (Creative Center
 sources:                      # 収集元。上から順に実行される
   - tiktok_video              # ★主力: TikTok本体から商品紹介動画を集める
                               #   ここから商品・クリエイター・タグを自動で導出する
-  - creative_center           # 補助: Creative Center の全体トレンド (認証不要)
-  # - browser_creative_center # Creative Center を実ブラウザで開いて XHR 傍受
+  - browser_creative_center   # 補助: Creative Center を実ブラウザで開いて傍受
+                              #   (HTTP直叩きより遅いが仕様変更に強い)
+  # - creative_center         # 同じものを HTTP で直叩き。速いが失敗しやすい
   # - ytdlp_watch             # watchlist のクリエイターを定点観測
   # - thirdparty              # 有料分析サービス (下の thirdparty_apis を参照)
 
@@ -105,6 +107,8 @@ notify_channels: []           # slack / discord / email / file
 
 # --- 動作 ---
 request_interval: 1.2         # 同一ホストへの最小リクエスト間隔 (秒). 下げすぎない
+# false にするとブラウザが画面に表示される。
+# 自動操作と判定されて弾かれる場合は false を試す。
 headless: true
 keep_days: 180
 
@@ -310,6 +314,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    """収集が 0 件のときに、実際の通信を記録して原因を切り分ける."""
+    cfg = Config.load(args.config)
+    from .probe import run_probe
+
+    query = args.query or (cfg.raw.get("video_queries") or ["購入品紹介"])[0]
+    return run_probe(cfg, query=query, visible=args.visible,
+                     seconds=args.seconds, out_dir=args.out or cfg.report_dir)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """ローカル Web アプリを起動する."""
     cfg = Config.load(args.config)
@@ -411,6 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  ttradar init                   設定ファイルを作る\n"
             "  ttradar doctor                 環境を診断する\n"
             "  ttradar demo                   オフラインで動作を体験する\n"
+            "  ttradar probe --visible        収集が0件のとき原因を調べる\n"
             "  ttradar serve                  ブラウザでダッシュボードを開く\n"
             "  ttradar run                    収集〜通知まで一括 (cron 向け)\n"
             "  ttradar report --html          最新の分析を HTML で出力\n"
@@ -448,6 +463,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--source", "-s", action="append")
     s.add_argument("--region", "-r")
     s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("probe",
+                       help="TikTok から実際に何が返るか調べる (収集が0件のとき)")
+    s.add_argument("--query", "-q", help="調べる検索キーワード")
+    s.add_argument("--visible", action="store_true",
+                   help="ブラウザを画面に表示する (ログイン壁や確認画面が見える)")
+    s.add_argument("--seconds", type=float, default=25.0,
+                   help="ページを開いてから記録する秒数")
+    s.add_argument("--out", help="結果の書き出し先")
+    s.set_defaults(func=cmd_probe)
 
     s = sub.add_parser("serve", help="ブラウザで見るダッシュボードを起動する")
     s.add_argument("--port", "-p", type=int, default=8765)

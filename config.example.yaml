@@ -6,8 +6,9 @@ regions: [JP]                 # 対象国。US, GB なども可 (Creative Center
 sources:                      # 収集元。上から順に実行される
   - tiktok_video              # ★主力: TikTok本体から商品紹介動画を集める
                               #   ここから商品・クリエイター・タグを自動で導出する
-  - creative_center           # 補助: Creative Center の全体トレンド (認証不要)
-  # - browser_creative_center # Creative Center を実ブラウザで開いて XHR 傍受
+  - browser_creative_center   # 補助: Creative Center を実ブラウザで開いて傍受
+                              #   (HTTP直叩きより遅いが仕様変更に強い)
+  # - creative_center         # 同じものを HTTP で直叩き。速いが失敗しやすい
   # - ytdlp_watch             # watchlist のクリエイターを定点観測
   # - thirdparty              # 有料分析サービス (下の thirdparty_apis を参照)
 
@@ -71,6 +72,8 @@ notify_channels: []           # slack / discord / email / file
 
 # --- 動作 ---
 request_interval: 1.2         # 同一ホストへの最小リクエスト間隔 (秒). 下げすぎない
+# false にするとブラウザが画面に表示される。
+# 自動操作と判定されて弾かれる場合は false を試す。
 headless: true
 keep_days: 180
 

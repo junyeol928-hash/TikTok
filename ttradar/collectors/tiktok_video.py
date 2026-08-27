@@ -304,6 +304,9 @@ class TikTokVideoCollector(Collector):
         captured: list[dict[str, Any]] = []
         captured_at = time.time()
         out: list[Snapshot] = []
+        # 0 件だったときに原因を示せるよう、見かけた API 通信を控えておく
+        other_api: dict[str, int] = {}
+        page_hint = ""
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
@@ -329,8 +332,13 @@ class TikTokVideoCollector(Collector):
             def on_response(resp: Any) -> None:
                 url = resp.url
                 if not any(m in url for m in ITEM_LIST_MARKERS):
+                    # 傍受対象外でも API らしきものは控える (原因調査用)
+                    if "/api/" in url:
+                        key = url.split("?")[0]
+                        other_api[key] = other_api.get(key, 0) + 1
                     return
                 if resp.status != 200:
+                    other_api[f"[{resp.status}] {url.split('?')[0]}"] = 1
                     return
                 try:
                     if "json" not in (resp.headers or {}).get("content-type", ""):
@@ -357,6 +365,12 @@ class TikTokVideoCollector(Collector):
                 except Exception as e:  # 1 クエリの失敗で全体を止めない
                     log.warning("%s の取得に失敗: %s", label, e)
                     continue
+                if not captured and not page_hint:
+                    # 何も取れていないときだけ、画面に何が出ているか読む
+                    try:
+                        page_hint = " ".join(page.inner_text("body")[:300].split())
+                    except Exception:
+                        pass
 
             ctx.close()
             browser.close()
@@ -378,6 +392,22 @@ class TikTokVideoCollector(Collector):
 
         log.info("動画 %d 件を採用 (商品紹介らしさ %.2f 未満の %d 件を除外)",
                  len(out), min_intent, skipped)
+
+        if not captured:
+            # ここが 0 だと、フィルタ以前に一覧そのものを受け取れていない。
+            # 推測させないために、実際に見えたものを出す。
+            log.warning("動画一覧の通信を1件も受け取れませんでした。")
+            if page_hint:
+                log.warning("  画面の文言: %s", page_hint[:200])
+            if other_api:
+                log.warning("  代わりに見えた API 通信 (上位10件):")
+                for u, c in sorted(other_api.items(), key=lambda x: -x[1])[:10]:
+                    log.warning("    %3d回  %s", c, u)
+            else:
+                log.warning("  API 通信自体がありませんでした "
+                            "(ログイン壁・自動操作判定の可能性)")
+            log.warning("  原因を詳しく調べるには: ttradar probe --visible")
+
         return dedupe(out)
 
     def _scroll(self, page: Any) -> None:
