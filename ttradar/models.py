@@ -195,6 +195,10 @@ class TrendSignal:
     thumbnail: str | None = None
     is_new: bool = False
     first_seen: float | None = None
+    #: 「この商品で撮るべきか」の判定 (コード, ラベル, 一言)。商品のみ。
+    #: スコアは順位を付けるための連続値で「で、撮るの?」には答えていないので、
+    #: 行動に直結する判定を別に持たせる。
+    verdict: tuple[str, str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -202,4 +206,7 @@ class TrendSignal:
         d["stage"] = self.stage.value
         d["stage_label"] = self.stage.label_ja
         d["stage_emoji"] = self.stage.emoji
+        if self.verdict:
+            code, label, note = self.verdict
+            d["verdict"] = {"code": code, "label": label, "note": note}
         return d

@@ -144,6 +144,25 @@ select.btn{appearance:none;padding-right:10px}
   border:1px solid var(--line)}
 .chip.tag{cursor:pointer}
 .chip.muted{opacity:.55}
+/* 撮る判断。順位より先に目に入る位置に置く。
+   利用者が最後に知りたいのは「で、これで撮るの?」だから。 */
+.vd{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;
+  border-radius:7px;font-size:11.5px;font-weight:800;white-space:nowrap;
+  border:1px solid transparent}
+.vd.v-go{background:var(--good-wash);color:var(--good);border-color:var(--good)}
+.vd.v-untested,.vd.v-hurry{background:transparent;color:var(--serious);
+  border-color:var(--serious)}
+.vd.v-crowded,.vd.v-late,.vd.v-fake,.vd.v-risky{background:transparent;
+  color:var(--critical);border-color:var(--critical)}
+.vd.v-compete,.vd.v-ok{background:transparent;color:var(--ink-3);
+  border-color:var(--line-2)}
+.vdnote{font-size:11.5px;color:var(--ink-2);margin-top:3px}
+
+.live{display:inline-flex;align-items:center;gap:5px}
+.live i{width:6px;height:6px;border-radius:50%;background:var(--good);
+  animation:blink 1.8s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live i{animation:none}}
 .chip.tag:hover{border-color:var(--accent);color:var(--accent)}
 
 .num{font-variant-numeric:tabular-nums}
@@ -472,7 +491,7 @@ const S = {
   formats:null,                       // どういう型の紹介動画が伸びているか
   settings:null,                      // 期間・食べ物の扱い (アプリから変更できる)
   meta:null, summary:null, products:[], videos:[], tags:[], creators:[],
-  jobTimer:null, lastJob:0, tableMode:false,
+  job:null, jobTimer:null, lastJob:0, tableMode:false,
 };
 
 const $  = (id)=>document.getElementById(id);
@@ -530,6 +549,15 @@ function stageClass(st){
 function stageBadge(r){
   return `<span class="stage ${stageClass(r.stage)}">${r.stage_emoji} ${esc(r.stage_label)}</span>`;
 }
+/* 撮る判断を 1 つのバッジにする。絵文字＋語で、色に頼らず読める。 */
+const VD_ICON={go:"🎯",untested:"⚡",hurry:"⏳",compete:"🥊",crowded:"🚫",
+               late:"🕐",fake:"🤨",risky:"🎲",ok:"🙂"};
+function verdictBadge(r){
+  const v=r.verdict; if(!v)return "";
+  return `<span class="vd v-${esc(v.code)}" title="${esc(v.note)}">
+    ${VD_ICON[v.code]||""} ${esc(v.label)}</span>`;
+}
+
 /* 商品名をどこから取ったか。キャプションからの推定なら、そう明示する。
    推定である以上、利用者が根拠の動画で確かめられる必要がある。 */
 const NAME_SRC={anchor:["🛒","リンク確定","TikTok Shop の商品リンクから取得"],
@@ -680,11 +708,13 @@ function viewToday(){
   const hero=`<div class="hero">
     <div class="hero-l">
       <div class="hero-eyebrow"><span class="pulse"></span>今いちばん撮る価値がある商品
-        ${stageBadge(top)}
+        ${verdictBadge(top)}${stageBadge(top)}
         <span class="chip" style="font-weight:700">スコア ${Math.round(top.score)}</span>
         ${srcBadge(top)}
       </div>
       <h2>${esc(top.name)}</h2>
+      ${top.verdict?`<div class="why" style="color:var(--ink);font-weight:700">
+        ${esc(top.verdict.note)}</div>`:""}
       <div class="why">${esc((top.reasons||[]).slice(0,3).join(" ／ "))}</div>
       <div class="hero-stats">
         <div class="hstat"><div class="k">中央値再生</div>
@@ -743,10 +773,11 @@ function productRow(r,rank){
       tabindex="0" role="button" aria-label="${esc(r.name)} スコア${Math.round(r.score)}">
     <div class="prank">${rank}</div>
     <div class="pmain">
-      <div class="pname"><span class="t">${esc(r.name)}</span>${stageBadge(r)}
-        ${srcBadge(r)}
+      <div class="pname"><span class="t">${esc(r.name)}</span>${verdictBadge(r)}
+        ${stageBadge(r)}${srcBadge(r)}
         ${r.category?`<span class="chip">${esc(r.category)}</span>`:""}</div>
-      <div class="preason">${esc((r.reasons||[]).slice(0,2).join(" ／ "))}</div>
+      <div class="preason">${r.verdict?`<b>${esc(r.verdict.note)}</b> ／ `:""}${
+        esc((r.reasons||[]).slice(0,2).join(" ／ "))}</div>
     </div>
     <div class="pstrip">${strip}</div>
     <div class="pmetrics">
@@ -776,12 +807,13 @@ function viewProducts(){
 }
 function productTable(rows){
   return `<div class="card tablewrap"><table>
-    <thead><tr><th>#</th><th>商品</th><th>状態</th><th class="r">スコア</th>
+    <thead><tr><th>#</th><th>商品</th><th>撮る判断</th><th>状態</th><th class="r">スコア</th>
       <th class="r">中央値再生</th><th class="r">合計再生</th><th class="r">保存率</th>
       <th class="r">再現性</th><th class="r">動画数</th><th class="r">投稿者</th>
       <th class="r">伸び率</th><th>根拠</th></tr></thead>
     <tbody>${rows.map((r,i)=>{const m=r.metrics||{};return `<tr>
       <td>${i+1}</td><td>${esc(r.name)}</td>
+      <td>${r.verdict?esc((VD_ICON[r.verdict.code]||"")+" "+r.verdict.label):"—"}</td>
       <td>${r.stage_emoji} ${esc(r.stage_label)}</td>
       <td class="r">${Math.round(r.score)}</td>
       <td class="r">${n(m.median_views)}</td><td class="r">${n(m.total_views)}</td>
@@ -1187,6 +1219,9 @@ function renderDetail(row,h){
     <div class="dsec"><h4>推移（${series.length} 回の観測）</h4>
       <svg id="dChart" class="chart" role="img" aria-label="時系列推移"></svg>
       <div id="dNote" style="font-size:11px;color:var(--ink-3);margin-top:7px"></div></div>
+    ${row&&row.verdict?`<div class="dsec"><h4>撮る判断</h4>
+      ${verdictBadge(row)}
+      <div class="vdnote">${esc(row.verdict.note)}</div></div>`:""}
     ${row?`<div class="dsec"><h4>評価</h4><div class="mgrid">
       <div><div class="k">スコア</div><div class="v">${Math.round(row.score)}</div></div>
       <div><div class="k">ステージ</div><div class="v" style="font-size:13px">${row.stage_emoji} ${esc(row.stage_label)}</div></div>
@@ -1359,16 +1394,36 @@ async function loadAll(){
         ? S.videoCounts[S.kind] : S.videos.length)||"";
     $("nTags").textContent=S.tags.length||"";
     $("nCreators").textContent=S.creators.length||"";
-    const iv=S.job&&S.job.interval_min;
-    $("railfoot").innerHTML=
-      `${esc(sum.region)} ・ ${sum.total_entities} 件追跡中<br>`+
-      `最終収集 ${when(sum.last_capture)}<br>収集 ${sum.capture_rounds} 回`+
-      (iv?`<br>${iv} 分ごとに自動収集`:"");
+    renderFoot();
     render();
   }catch(e){
     $("page").innerHTML=`<div class="empty"><h3>読み込めませんでした</h3>
       <p>${esc(e.message)}</p></div>`;
   }finally{ page.classList.remove("loading"); }
+}
+
+/* 「次の収集まであと何分か」を出す。
+   自動収集が動いていることが見えないと、止まっているのか
+   ただ待っているだけなのか利用者には分からない。 */
+function renderFoot(){
+  const sum=S.summary, j=S.job||{}; if(!sum)return;
+  const foot=$("railfoot"); if(!foot)return;
+  let sched="";
+  if(j.running) sched=`<br><span class="live"><i></i>いま収集中…</span>`;
+  else if(j.next_run){
+    const left=Math.max(0,j.next_run-Date.now()/1000);
+    const warm=sum.capture_rounds<3;
+    sched=`<br><span class="live"><i></i>次の収集まで ${fmtLeft(left)}</span>`
+        + (warm?`<br><span style="color:var(--accent)">履歴を作るため短い間隔で収集中</span>`
+                :`<br>${j.interval_min} 分ごとに自動収集`);
+  }
+  foot.innerHTML=`${esc(sum.region)} ・ ${sum.total_entities} 件追跡中<br>`+
+    `最終収集 ${when(sum.last_capture)}<br>収集 ${sum.capture_rounds} 回`+sched;
+}
+function fmtLeft(sec){
+  if(sec<60)return "1 分未満";
+  const m=Math.round(sec/60);
+  return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;
 }
 
 async function startCollect(){
@@ -1396,8 +1451,9 @@ async function pollJob(){
       await loadAll();
     }
   }
+  renderFoot();
   // 自動収集が有効なら、次回実行を拾うために緩くポーリングを続ける
-  if(j.interval_min) S.jobTimer=setTimeout(pollJob,30000);
+  if(j.interval_min||j.next_run) S.jobTimer=setTimeout(pollJob,30000);
 }
 
 /* ---------------------------------------------------------------- 初期化 */

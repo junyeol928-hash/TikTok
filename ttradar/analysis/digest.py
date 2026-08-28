@@ -18,7 +18,8 @@ from ..util.log import get
 from .category import is_food
 from .metrics import GrowthResult, compute_growth, classify_stage
 from .rollup import rollup_all
-from .scoring import score_generic, score_product, score_video_product
+from .scoring import (filming_verdict, score_generic, score_product,
+                      score_video_product)
 
 log = get(__name__)
 
@@ -308,6 +309,8 @@ class Radar:
                         metrics=metrics if derived else None,
                     )
 
+                verdict = (filming_verdict(stage, metrics)
+                           if etype == EntityType.PRODUCT else None)
                 signals.append(TrendSignal(
                     entity_key=ent["entity_key"],
                     entity_type=etype,
@@ -327,6 +330,7 @@ class Radar:
                     thumbnail=ent["thumbnail"],
                     is_new=r["is_new"],
                     first_seen=float(ent["first_seen"]),
+                    verdict=verdict,
                 ))
 
             signals.sort(key=lambda s: s.score, reverse=True)

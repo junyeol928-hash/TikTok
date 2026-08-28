@@ -243,3 +243,77 @@ def test_niche_matching_boosts_score(cfg):
     assert radar._matches_niche("温感アイマスク", "美容") is True
     assert radar._matches_niche("低温調理器", "家電") is False
     db.close()
+
+
+# ---------------------------------------------------------------- 撮る判断
+
+def _vm(**kw):
+    from ttradar.models import M
+    base = {M.VIDEO_COUNT: 8.0, M.CREATOR_COUNT: 7.0, M.HIT_RATE: 0.7}
+    base.update({getattr(M, k.upper()): v for k, v in kw.items()})
+    return base
+
+
+@pytest.mark.parametrize("stage,metrics,expect", [
+    # 下降中は何本あっても遅い
+    (TrendStage.DECLINING, _vm(), "late"),
+    # 埋もれる
+    (TrendStage.RISING, _vm(video_count=200.0), "crowded"),
+    # 本数の割に投稿者が少ない = 一人が量産しているだけ
+    (TrendStage.RISING, _vm(video_count=9.0, creator_count=2.0), "fake"),
+    # まだ誰も試していない
+    (TrendStage.RISING, _vm(video_count=2.0, creator_count=2.0), "untested"),
+    # 鈍り始め
+    (TrendStage.PEAKING, _vm(), "hurry"),
+    # 適正範囲を超えている
+    (TrendStage.RISING, _vm(video_count=46.0, creator_count=30.0), "compete"),
+    # まぐれ 1 本
+    (TrendStage.RISING, _vm(hit_rate=0.2), "risky"),
+    # 狙い目
+    (TrendStage.EMERGING, _vm(), "go"),
+    (TrendStage.NEW, _vm(), "go"),
+    # 横ばいで特徴なし
+    (TrendStage.STABLE, _vm(), "ok"),
+])
+def test_filming_verdict(stage, metrics, expect):
+    """「で、これで撮るの?」に一言で答えられること.
+
+    スコアは順位付けの連続値で、行動を決められない。
+    競合の本数・再現性・段階から、迷わない判定を出す。
+    """
+    from ttradar.analysis.scoring import filming_verdict
+    code, label, note = filming_verdict(stage, metrics)
+    assert code == expect
+    assert label and note, "ラベルと一言は必ず埋まっていること"
+
+
+def test_verdict_order_matters():
+    """下降中は本数が少なくても『先行のチャンス』にしない."""
+    from ttradar.analysis.scoring import filming_verdict
+    code, _, _ = filming_verdict(TrendStage.DECLINING, _vm(video_count=1.0))
+    assert code == "late"
+
+
+def test_verdict_reaches_signals(tmp_path):
+    """商品シグナルに判定が乗ること (UI がそのまま出せる)."""
+    from ttradar.analysis.rollup import rollup_all
+    from ttradar.collectors.demo import DemoCollector
+    from ttradar.config import Config
+    from ttradar.db import Database
+    from ttradar.analysis.digest import Radar
+    from ttradar.models import EntityType
+
+    cfg = Config()
+    cfg.sources = ["demo"]
+    cfg.db_path = str(tmp_path / "v.db")
+    with Database(cfg.db_path) as db:
+        for off in range(3, -1, -1):
+            v = DemoCollector(cfg, day_offset=float(off)).collect("JP")
+            db.upsert_snapshots(v + rollup_all(v, "JP"))
+        sigs = Radar(cfg, db).analyze("JP", 72).by_type[EntityType.PRODUCT]
+
+    assert sigs and all(s.verdict for s in sigs), "商品に判定が付いていない"
+    # 種類が 1 つに潰れていないこと (全部「撮れる」では判断材料にならない)
+    assert len({s.verdict[0] for s in sigs}) >= 3
+    d = sigs[0].to_dict()
+    assert set(d["verdict"]) == {"code", "label", "note"}

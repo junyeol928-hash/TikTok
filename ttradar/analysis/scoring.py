@@ -326,6 +326,62 @@ def competition_fit(video_count: float | None) -> tuple[float, str | None]:
     return 0.15, f"紹介動画 {n:.0f} 本 — 飽和。今から入っても埋もれる"
 
 
+#: 「この商品で撮るべきか」の判定結果.
+#: (コード, ラベル, 一言) — UI と通知でそのまま使う。
+FilmingVerdict = tuple[str, str, str]
+
+
+def filming_verdict(stage: TrendStage, metrics: dict[str, float]) -> FilmingVerdict:
+    """撮る判断を 1 つに落とす.
+
+    スコアは順位を付けるための連続値で、「で、撮るの?」には答えていない。
+    利用者が最後に知りたいのはそこなので、競合の本数・再現性・段階から
+    行動に直結する判定を出す。
+
+    見ている軸:
+
+    競合の本数
+        少なすぎ (1-2 本) = 誰も成功していない。多すぎ (120 本超) = 埋もれる。
+    再現性
+        平均を超えた動画の割合。低いと「まぐれ 1 本」で、真似しても伸びない。
+    段階
+        下降中なら今から撮っても遅い。
+    投稿者数
+        本数の割に投稿者が少ないなら、一人が量産しているだけで需要ではない。
+    """
+    n = float(metrics.get(M.VIDEO_COUNT) or metrics.get(M.RELATED_VIDEOS) or 0)
+    hit = metrics.get(M.HIT_RATE)
+    creators = float(metrics.get(M.CREATOR_COUNT) or 0)
+
+    if stage is TrendStage.DECLINING:
+        return ("late", "ピーク後",
+                "勢いが落ちている。今から撮っても伸びにくい")
+    if n >= COMPETITION_SATURATED:
+        return ("crowded", "飽和",
+                f"紹介動画が {n:.0f} 本。後から出しても埋もれる")
+    if n and creators and creators <= 2 and n >= 4:
+        return ("fake", "需要が怪しい",
+                f"{n:.0f} 本あるが投稿者は {creators:.0f} 人。"
+                "一人が量産しているだけの可能性")
+    if n and n <= 2:
+        return ("untested", "先行のチャンス",
+                f"まだ {n:.0f} 本しかない。当たれば独占できるが、"
+                "誰も成功していないので賭けになる")
+    if stage is TrendStage.PEAKING:
+        return ("hurry", "急ぐなら今",
+                "伸びが鈍り始めている。撮るなら早めに")
+    if n > COMPETITION_SWEET_HI:
+        return ("compete", "競合が多い",
+                f"紹介動画が {n:.0f} 本。切り口を変えないと埋もれる")
+    if hit is not None and hit < 0.35:
+        return ("risky", "当たり外れが大きい",
+                f"平均を超えたのは {hit:.0%} だけ。まぐれの 1 本かもしれない")
+    if stage in (TrendStage.EMERGING, TrendStage.RISING, TrendStage.NEW):
+        return ("go", "いま撮るべき",
+                f"伸びていて紹介動画はまだ {n:.0f} 本。競合が増える前に出せる")
+    return ("ok", "撮れる", "極端に良くも悪くもない。撮るなら差別化が要る")
+
+
 def score_video_product(
     growth: GrowthResult,
     stage: TrendStage,

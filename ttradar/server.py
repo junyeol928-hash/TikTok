@@ -55,6 +55,14 @@ class Scheduler(threading.Thread):
     それをユーザーの環境構築に依存させないほうが確実に動く。
     """
 
+    #: 履歴が貯まるまでの短い間隔 (分)。
+    #: 伸び率は 2 回目、加速度とステージ判定は 3 回目の観測から出る。
+    #: 通常間隔が 2 時間だと、意味のある分析が出るまで 4 時間待つことになり、
+    #: 起動直後のアプリが「まだ 1 回しか収集していません」のままになる。
+    WARMUP_MIN = 15.0
+    #: 何回貯まるまで短い間隔で回すか
+    WARMUP_ROUNDS = 3
+
     def __init__(self, cfg: Config, interval_min: float, run_now: bool = False):
         super().__init__(daemon=True)
         self.cfg = cfg
@@ -62,14 +70,27 @@ class Scheduler(threading.Thread):
         self.run_now = run_now
         self._stop = threading.Event()
 
+    def _rounds(self) -> int:
+        """これまでに何回収集したか (再起動をまたいで数える)."""
+        try:
+            with Database(self.cfg.db_path) as db:
+                return len(db.distinct_capture_times(self.WARMUP_ROUNDS + 1))
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _next_wait(self) -> float:
+        """次の収集までの秒数. 履歴が浅いうちは短くする."""
+        if self._rounds() < self.WARMUP_ROUNDS:
+            return min(self.interval, self.WARMUP_MIN * 60.0)
+        return self.interval
+
     def run(self) -> None:
-        with _job_lock:
-            _job["interval_min"] = round(self.interval / 60)
         # 起動直後に 1 回走らせるかは呼び出し側の指定に従う
-        wait = 0.0 if self.run_now else self.interval
+        wait = 0.0 if self.run_now else self._next_wait()
         while not self._stop.is_set():
             with _job_lock:
                 _job["next_run"] = time.time() + wait
+                _job["interval_min"] = round(max(wait, self._next_wait()) / 60)
             if self._stop.wait(wait):
                 break
             try:
@@ -77,7 +98,8 @@ class Scheduler(threading.Thread):
                 _run_collect(self.cfg)
             except Exception:  # noqa: BLE001 - スレッドを死なせない
                 log.exception("定期収集が失敗しました")
-            wait = self.interval
+            wait = self._next_wait()
+            log.info("次の収集は %.0f 分後です", wait / 60)
 
     def stop(self) -> None:
         self._stop.set()
