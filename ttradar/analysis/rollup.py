@@ -44,6 +44,23 @@ _SPACES = re.compile(r"\s+")
 _STOPWORDS = {"商品", "アイテム", "リンク", "こちら", "詳細", "shop", "tiktok",
               "セール", "クーポン", "割引", "購入", "ショップ", "ここから"}
 
+#: 商品とは関係なく、露出を取るためだけに付けるタグ。
+#: 集計から外すと「実際に使われているタグ」ではなくなるので残すが、
+#: 商品ジャンルのタグと同列に見えると「#fyp を付けろ」という
+#: 中身のない示唆になってしまうため、UI で区別できるよう印を付ける。
+REACH_TAGS = {
+    "fyp", "fypシ", "fypage", "foryou", "foryoupage", "viral", "trending",
+    "tiktok", "tiktokjapan", "capcut", "おすすめ", "おすすめにのりたい",
+    "おすすめのりたい", "おすすめに乗りたい", "バズりたい", "伸びろ",
+    "拡散希望", "急上昇", "フォロー", "フォローミー", "いいね", "followme",
+}
+
+
+def is_reach_tag(tag: str) -> bool:
+    """商品ではなく露出目的のタグか."""
+    return str(tag).strip().lstrip("#").lower() in REACH_TAGS
+
+
 #: 商品名ではなく導線の文言。アンカーのタイトルにこれが入ることがある
 _JUNK_PHRASES = re.compile(
     r"(リンクはこちら|詳細はこちら|プロフィール(から|のリンク)|こちらから|"
@@ -176,6 +193,7 @@ def rollup_hashtags(videos: Iterable[Snapshot], region: str,
         snap = _build(EntityType.HASHTAG, tag, f"#{tag}", vids, region, source,
                       url=f"https://www.tiktok.com/tag/{tag}", hit_bar=hit_bar)
         snap.metrics[M.POSTS] = float(len(vids))
+        snap.extra["reach_tag"] = is_reach_tag(tag)
         out.append(snap)
     return out
 
@@ -257,13 +275,18 @@ def _build(etype: EntityType, native_id: str, name: str,
 
 
 def _common_hashtags(vids: list[Snapshot], top_n: int = 8) -> list[dict[str, Any]]:
-    """この群でよく使われているハッシュタグ (そのまま真似できる)."""
+    """この群でよく使われているハッシュタグ (そのまま真似できる).
+
+    露出目的のタグ (#fyp など) は後ろに回す。
+    「この商品の紹介動画では何のタグが使われているか」を知りたいのに、
+    どのジャンルにも付く汎用タグが先頭を占めると意味がないため。
+    """
     counts: dict[str, int] = defaultdict(int)
     for v in vids:
         for t in set((v.extra or {}).get("hashtags") or []):
             counts[str(t).lstrip("#")] += 1
-    ranked = sorted(counts.items(), key=lambda x: -x[1])[:top_n]
-    return [{"tag": t, "count": c} for t, c in ranked]
+    ranked = sorted(counts.items(), key=lambda x: (is_reach_tag(x[0]), -x[1]))[:top_n]
+    return [{"tag": t, "count": c, "reach": is_reach_tag(t)} for t, c in ranked]
 
 
 def rollup_all(videos: Sequence[Snapshot], region: str) -> list[Snapshot]:

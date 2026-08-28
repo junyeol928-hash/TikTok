@@ -42,7 +42,13 @@ STAGE_ADVICE: dict[TrendStage, str] = {
 
 
 def _fmt_pct(v: float | None) -> str:
+    """変化率. 増減が主題なので符号を付ける."""
     return "—" if v is None else f"{v:+.0%}"
+
+
+def _fmt_rate(v: float | None) -> str:
+    """保存率などの割合. 符号は付けず、小数第1位まで出す."""
+    return "—" if v is None else f"{v:.1%}"
 
 
 def _fmt_num(v: float | None) -> str:
@@ -66,10 +72,18 @@ def score_generic(
     age_days: float | None,
     weights: ScoreWeights,
     niche_match: bool = False,
+    volume_label: str = "現在値",
+    volume_unit: str = "",
+    metrics: dict[str, float] | None = None,
 ) -> tuple[float, list[str]]:
     """ハッシュタグ / 楽曲 / キーワード / 動画向けの汎用スコア.
 
     戻り値は ``(0-100 のスコア, 日本語の根拠リスト)``。
+
+    ``volume_label`` / ``metrics`` は根拠文を読めるものにするためのもの。
+    動画から導出したタグでは主要指標が「紹介動画の本数」なので、
+    「現在値 40」ではなく「紹介動画 40 本」と出したい。
+    中央値再生や保存率も取れるため、順位の理由として一緒に出す。
     """
     w = weights.normalized()
     reasons: list[str] = []
@@ -114,7 +128,18 @@ def score_generic(
     else:
         volume_score = log_scale(cur)
     if cur > 0:
-        reasons.append(f"現在値 {_fmt_num(cur)}")
+        reasons.append(f"{volume_label} {_fmt_num(cur)}{volume_unit}")
+    if metrics:
+        med = metrics.get(M.MEDIAN_VIEWS)
+        if med:
+            reasons.append(f"代表的な1本が {_fmt_num(med)} 再生")
+        srate = metrics.get(M.SAVE_RATE)
+        if srate:
+            reasons.append(f"保存率 {_fmt_rate(srate)}")
+        creators = metrics.get(M.CREATOR_COUNT)
+        if creators and creators > 1:
+            # クリエイター行では常に 1 になるので情報が無い
+            reasons.append(f"投稿者 {creators:.0f} 人")
 
     # --- 新しさ ---
     if age_days is None:

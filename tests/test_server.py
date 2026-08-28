@@ -223,6 +223,30 @@ def test_meta_exposes_filter_settings(cfg):
     assert m["strong_intent"] > m["min_product_intent"]
 
 
+def test_derived_hashtags_survive_min_volume(seeded):
+    """動画から導出したタグが min_volume で消えないこと.
+
+    導出タグの主要指標は「今回の収集に含まれた紹介動画の本数」で、
+    数十本にしかならないのが正常。既定の min_volume=100 を掛けると
+    ハッシュタグの画面が丸ごと空になる。
+    """
+    cfg = seeded
+    cfg.min_volume = 100          # 既定値。これで消えてはいけない
+    rows = Api(cfg).signals(72, "JP", "hashtag", None, None, 50)["rows"]
+    assert rows, "導出タグが min_volume で全部消えている"
+    small = [r for r in rows if r["metrics"].get("posts", 0) < cfg.min_volume]
+    assert small, "min_volume 未満のタグが 1 件も残っていない"
+
+
+def test_reach_tags_are_marked(seeded):
+    """#fyp のような露出タグに印が付くこと (商品ジャンルのタグと区別する)."""
+    rows = Api(seeded).signals(72, "JP", "hashtag", None, None, 80)["rows"]
+    marks = {r["name"]: (r["extra"] or {}).get("reach_tag") for r in rows}
+    assert marks, "タグが 1 件も無い"
+    # 印は必ず真偽値で入る (UI が undefined を踏まない)
+    assert all(v is not None for v in marks.values())
+
+
 def test_formats_endpoint(seeded):
     """『どういう型の紹介動画が伸びているか』の集計.
 

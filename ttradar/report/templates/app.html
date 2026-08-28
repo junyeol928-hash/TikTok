@@ -143,6 +143,7 @@ select.btn{appearance:none;padding-right:10px}
   font-size:10.5px;font-weight:500;background:var(--panel-2);color:var(--ink-2);
   border:1px solid var(--line)}
 .chip.tag{cursor:pointer}
+.chip.muted{opacity:.55}
 .chip.tag:hover{border-color:var(--accent);color:var(--accent)}
 
 .num{font-variant-numeric:tabular-nums}
@@ -680,7 +681,8 @@ function viewToday(){
           <div class="s">${m.velocity?"1本あたりの伸び速度":"平均超えの割合"}</div></div>
       </div>
       <div class="hero-tags"><span class="lab">使うタグ</span>
-        ${tags.map(t=>`<button class="chip tag" data-tag="${esc(t.tag)}">#${esc(t.tag)}</button>`).join("")}
+        ${tags.map(t=>`<button class="chip tag${t.reach?" muted":""}"
+          data-tag="${esc(t.tag)}"${t.reach?' title="露出用の汎用タグ"':""}>#${esc(t.tag)}</button>`).join("")}
       </div>
     </div>
     <div class="hero-r">
@@ -904,11 +906,15 @@ function focusPanel(){
 /* ---------------------------------------------------------------- タグ / 人 */
 function simpleRow(r,i,valueLabel,valueFn){
   const m=r.metrics||{};
+  /* 露出目的のタグ (#fyp 等) は商品ジャンルのタグと同列に見せない。
+     同列だと「#fyp を付けろ」という中身のない示唆になってしまう。 */
+  const reach=(r.extra||{}).reach_tag
+    ? `<span class="chip" title="商品とは関係なく露出のために付けるタグ">リーチ用</span>` : "";
   return `<div class="srow" data-key="${esc(r.entity_key)}" tabindex="0" role="button">
     <div style="color:var(--ink-3);font-size:12px" class="num">${i}</div>
     <div style="min-width:0">
       <div style="font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;
-        text-overflow:ellipsis">${esc(r.name)} ${stageBadge(r)}</div>
+        text-overflow:ellipsis">${esc(r.name)} ${stageBadge(r)} ${reach}</div>
       <div style="font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;
         text-overflow:ellipsis">${esc((r.reasons||[]).slice(0,2).join(" ／ "))}</div>
     </div>
@@ -922,8 +928,14 @@ function simpleRow(r,i,valueLabel,valueFn){
 }
 function viewTags(){
   if(!S.tags.length)return `<div class="empty"><h3>タグがまだありません</h3></div>`;
-  return `<div class="card simple">${S.tags.map((r,i)=>
-    simpleRow(r,i+1,"動画数",m=>n(m.video_count||m.posts))).join("")}</div>`;
+  const row=(r,i)=>simpleRow(r,i+1,"動画数",m=>n(m.video_count||m.posts));
+  const isReach=r=>!!(r.extra||{}).reach_tag;
+  const genre=S.tags.filter(r=>!isReach(r)), reach=S.tags.filter(isReach);
+  const sect=(title,sub,rows,from)=>rows.length?`<div class="sect">
+    <div class="sect-h"><h2>${title}</h2><p>${sub}</p></div>
+    <div class="card simple">${rows.map((r,i)=>row(r,i+from)).join("")}</div></div>`:"";
+  return sect("商品ジャンルのタグ","伸びている紹介動画が実際に使っている、中身のあるタグ",genre,0)
+       + sect("リーチ用のタグ","どのジャンルにも付く汎用タグ。付ける価値はあるが差は付かない",reach,0);
 }
 function viewCreators(){
   if(!S.creators.length)return `<div class="empty"><h3>クリエイターがまだいません</h3></div>`;

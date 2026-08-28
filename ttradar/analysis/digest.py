@@ -221,9 +221,15 @@ class Radar:
                 ent, growth, metrics = r["ent"], r["growth"], r["metrics"]
                 cur = r["current"]
 
-                # ノイズ除去: 小さすぎるものは無視 (商品は販売数が小さくても価値がある)
-                if (etype != EntityType.PRODUCT and cur is not None
-                        and cur < self.config.min_volume):
+                # ノイズ除去: 小さすぎるものは無視 (商品は販売数が小さくても価値がある)。
+                #
+                # ただし動画から導出したものには掛けない。
+                # 導出タグの主要指標は「今回の収集に含まれた紹介動画の本数」で、
+                # 数十本にしかならないのが正常。ここに min_volume (既定100) を
+                # 掛けると導出タグが丸ごと消え、ハッシュタグの画面が常に空になる。
+                derived = str(ent["source"]).startswith("rollup")
+                if (etype != EntityType.PRODUCT and not derived
+                        and cur is not None and cur < self.config.min_volume):
                     continue
 
                 stage = classify_stage(growth, is_new=r["is_new"])
@@ -250,6 +256,12 @@ class Radar:
                         niche_match=niche,
                     )
                 else:
+                    # 動画から導出したものは主要指標が「紹介動画の本数」。
+                    # 「現在値 40」では何のことか分からないので言い換える。
+                    label, unit = (
+                        ("紹介動画", " 本") if derived and etype == EntityType.HASHTAG
+                        else ("フォロワー", " 人") if derived and etype == EntityType.CREATOR
+                        else ("現在値", ""))
                     score, reasons = score_generic(
                         growth, stage,
                         volume_cohort=volume_cohort,
@@ -258,6 +270,8 @@ class Radar:
                         age_days=r["age_days"],
                         weights=self.config.weights,
                         niche_match=niche,
+                        volume_label=label, volume_unit=unit,
+                        metrics=metrics if derived else None,
                     )
 
                 signals.append(TrendSignal(
