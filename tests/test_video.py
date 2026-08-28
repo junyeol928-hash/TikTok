@@ -179,6 +179,78 @@ def test_product_intent_detail_returns_evidence():
     assert product_intent_detail("なんでもない", [], True) == (1.0, [])
 
 
+def test_products_are_derived_without_shop_links():
+    """商品リンクが無い動画からも商品が作られること.
+
+    日本では Shop リンク付きの動画が少ないので、リンク必須にすると
+    伸びている紹介動画の大半が「商品不明」として捨てられてしまう。
+    """
+    from ttradar.analysis.rollup import rollup_products
+
+    def vid(i, cap):
+        return Snapshot(
+            entity_type=EntityType.VIDEO, native_id=f"n{i}", name=cap,
+            source="tiktok_video",
+            metrics={M.VIEWS: 100_000.0 + i, M.SAVES: 3000.0},
+            region="JP",
+            extra={"creator": f"c{i}", "hashtags": ["購入品紹介"],
+                   "product": None,
+                   "product_candidates": [
+                       {"name": "ダイソーの収納ケース",
+                        "confidence": 0.9, "source": "caption"}]},
+        )
+
+    prods = rollup_products([vid(1, "a"), vid(2, "b")], "JP")
+    assert len(prods) == 1
+    p = prods[0]
+    assert p.name == "ダイソーの収納ケース"
+    assert p.metrics[M.VIDEO_COUNT] == 2
+    # 推定であることと、根拠の動画が残っていること
+    assert p.extra["name_source"] == "caption"
+    assert 0 < p.extra["name_confidence"] < 1.0
+    assert len(p.extra["top_videos"]) == 2
+
+
+def test_low_confidence_names_are_dropped():
+    """自信の無い推定は商品にしない (一覧がゴミで埋まるのを防ぐ)."""
+    from ttradar.analysis.rollup import rollup_products
+
+    v = Snapshot(
+        entity_type=EntityType.VIDEO, native_id="x", name="なにか",
+        source="tiktok_video", metrics={M.VIEWS: 50_000.0}, region="JP",
+        extra={"creator": "c", "hashtags": [],
+               "product_candidates": [
+                   {"name": "よくわからないもの", "confidence": 0.35,
+                    "source": "caption"}]},
+    )
+    assert rollup_products([v], "JP") == []
+
+
+def test_old_snapshots_without_candidates_still_work():
+    """product_candidates を持たない過去のデータでも商品が作れること."""
+    from ttradar.analysis.rollup import rollup_products
+
+    v = Snapshot(
+        entity_type=EntityType.VIDEO, native_id="y", name="レビュー",
+        source="tiktok_video", metrics={M.VIEWS: 50_000.0}, region="JP",
+        extra={"creator": "c", "hashtags": [],
+               "product": {"name": "充電式 毛玉取り器", "url": "https://x/p/1"}},
+    )
+    prods = rollup_products([v], "JP")
+    assert prods and prods[0].name == "充電式 毛玉取り器"
+    assert prods[0].extra["name_source"] == "anchor"
+
+
+def test_parse_item_records_product_candidates():
+    """収集時にキャプションからの商品候補が保存されること."""
+    it = item(anchor=False)
+    it["desc"] = "ダイソーの新作収納ケースが優秀すぎた #購入品紹介"
+    snap = parse_item(it, "JP", "tiktok_video")
+    cands = snap.extra["product_candidates"]
+    assert cands and cands[0]["name"] == "ダイソーの新作収納ケース"
+    assert cands[0]["source"] == "caption"
+
+
 def test_parse_item_records_intent_evidence():
     snap = parse_item(item(), "JP", "tiktok_video")
     assert snap.extra["product"]["name"] == "充電式 毛玉取り器"

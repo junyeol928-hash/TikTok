@@ -21,6 +21,7 @@ import random
 import time
 from typing import Any
 
+from ..analysis.product_name import extract_products
 from ..models import EntityType, M, Snapshot
 from .base import Collector, register
 
@@ -190,6 +191,14 @@ class DemoCollector(Collector):
                         "hashtags": tags,
                         "product": ({"name": name, "url": None, "anchor_type": 2}
                                     if linked else None),
+                        # リンクが無い動画はキャプションから商品名を推定する
+                        # (本番と同じ経路を通す)
+                        "product_candidates": (
+                            [{"name": name, "confidence": 1.0, "source": "anchor"}]
+                            if linked else
+                            [{"name": c.name, "confidence": c.confidence,
+                              "source": c.source}
+                             for c in extract_products(caption, tags)]),
                         "product_intent": intent,
                         "intent_words": ([] if linked
                                          else ["購入", "レビュー"] if intent >= 0.65

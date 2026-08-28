@@ -34,6 +34,7 @@ from typing import Any, Iterable
 from urllib.parse import quote
 
 from ..analysis.category import is_food
+from ..analysis.product_name import extract_products
 from ..models import EntityType, M, Snapshot
 from ..util.log import get
 from .base import Collector, dedupe, register
@@ -297,6 +298,10 @@ def parse_item(item: dict[str, Any], region: str, source: str,
     hashtags = extract_hashtags(item)
     anchor = extract_product_anchor(item)
     intent, intent_words = product_intent_detail(desc, hashtags, anchor is not None)
+    # 商品リンクが無くても「何を紹介しているか」をキャプションから取り出す。
+    # 日本では Shop リンク付きの動画が少なく、リンク必須にすると
+    # 伸びている紹介動画の大半が「商品不明」として捨てられてしまう。
+    candidates = extract_products(desc, hashtags, anchor)
 
     cover = (video.get("cover") or video.get("originCover")
              or video.get("dynamicCover") or item.get("cover"))
@@ -318,6 +323,9 @@ def parse_item(item: dict[str, Any], region: str, source: str,
                                        if isinstance(author, dict) else None)),
             "hashtags": hashtags,
             "product": anchor,
+            "product_candidates": [
+                {"name": c.name, "confidence": c.confidence, "source": c.source}
+                for c in candidates],
             "product_intent": round(intent, 2),
             # 判定の根拠。UI に出して「なぜ商品紹介動画と見なしたか」を示す
             "intent_words": intent_words[:6],

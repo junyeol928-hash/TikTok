@@ -510,7 +510,8 @@ const METRIC_JA={views:"再生数",posts:"投稿数",likes:"いいね",comments:
   related_creators:"投稿者数",search_volume:"検索数",ctr:"CTR",
   engagement_rate:"エンゲージ率",save_rate:"保存率",duration:"長さ",
   video_count:"紹介動画数",creator_count:"投稿者数",total_views:"合計再生",
-  median_views:"中央値再生",age_hours:"経過時間",velocity:"時速",hit_rate:"再現性"};
+  median_views:"中央値再生",age_hours:"経過時間",velocity:"時速",hit_rate:"再現性",
+  total_velocity:"時速の合計"};
 function fmtMetric(k,v){
   if(["commission_rate","ctr","engagement_rate","save_rate","hit_rate"].includes(k))return rate(v);
   if(k==="price")return"¥"+n(v);
@@ -528,6 +529,18 @@ function stageClass(st){
 }
 function stageBadge(r){
   return `<span class="stage ${stageClass(r.stage)}">${r.stage_emoji} ${esc(r.stage_label)}</span>`;
+}
+/* 商品名をどこから取ったか。キャプションからの推定なら、そう明示する。
+   推定である以上、利用者が根拠の動画で確かめられる必要がある。 */
+const NAME_SRC={anchor:["🛒","リンク確定","TikTok Shop の商品リンクから取得"],
+                caption:["📝","キャプションから","動画の説明文から推定"],
+                hashtag:["#","タグから","ハッシュタグから推定"]};
+function srcBadge(r){
+  const e=r.extra||{}, s=NAME_SRC[e.name_source];
+  if(!s)return "";
+  const c=e.name_confidence;
+  return `<span class="chip" title="${esc(s[2])}${c?` ／ 確からしさ ${Math.round(c*100)}%`:""}">
+    ${s[0]} ${s[1]}</span>`;
 }
 
 /* サムネイル: 画像が無くても意味のある見た目になるよう色を名前から決定 */
@@ -606,7 +619,7 @@ function spark(vals,w,h){
 
 const VIEWS = {
   today:    {title:"今日の一手",   sub:"実際に伸びている紹介動画から、今撮るべき商品を決める"},
-  products: {title:"商品",         sub:"商品リンク付きの紹介動画だけから抽出。クリックで根拠を表示"},
+  products: {title:"商品",         sub:"伸びている紹介動画が何を紹介しているか。クリックで根拠の動画を表示"},
   videos:   {title:"商品紹介動画", sub:"どういう型の紹介動画が伸びているか。対象は商品紹介と判定した動画だけ"},
   hashtags: {title:"ハッシュタグ", sub:"伸びている紹介動画が実際に使っているタグ"},
   creators: {title:"クリエイター", sub:"同じジャンルで結果を出している投稿者"},
@@ -656,10 +669,10 @@ function emptyState(){
 function viewToday(){
   const top=S.products[0];
   if(!top) return focusPanel()+`<div class="empty"><h3>商品がまだ抽出できていません</h3>
-    <p>商品は <b>TikTok Shop の商品リンクが付いた紹介動画</b> からだけ作ります。
-    リンク無しの紹介動画は「商品紹介動画」タブとハッシュタグの集計に使われます。</p>
-    <p>収集を重ねるか、config.yaml の <code>video_queries</code> に
-    ご自身のジャンルの語を足してみてください。</p></div>`;
+    <p>商品名は、紹介動画のキャプション・ハッシュタグ・商品リンクから取り出します。
+    まだ商品名を特定できる動画が集まっていません。</p>
+    <p>収集を重ねるか、<code>config.yaml</code> の <code>video_queries</code> に
+    ご自身のジャンルの語（コスメ 購入品 / ガジェット レビュー など）を足してみてください。</p></div>`;
   const m=top.metrics||{}, e=top.extra||{};
   const vids=(e.top_videos||[]).slice(0,3);
   const tags=(e.hashtags||[]).slice(0,7);
@@ -669,7 +682,7 @@ function viewToday(){
       <div class="hero-eyebrow"><span class="pulse"></span>今いちばん撮る価値がある商品
         ${stageBadge(top)}
         <span class="chip" style="font-weight:700">スコア ${Math.round(top.score)}</span>
-        <span class="chip" title="TikTok Shop の商品リンク付き紹介動画から抽出しています">🛒 リンク確定</span>
+        ${srcBadge(top)}
       </div>
       <h2>${esc(top.name)}</h2>
       <div class="why">${esc((top.reasons||[]).slice(0,3).join(" ／ "))}</div>
@@ -731,6 +744,7 @@ function productRow(r,rank){
     <div class="prank">${rank}</div>
     <div class="pmain">
       <div class="pname"><span class="t">${esc(r.name)}</span>${stageBadge(r)}
+        ${srcBadge(r)}
         ${r.category?`<span class="chip">${esc(r.category)}</span>`:""}</div>
       <div class="preason">${esc((r.reasons||[]).slice(0,2).join(" ／ "))}</div>
     </div>
@@ -748,8 +762,8 @@ function productRow(r,rank){
 }
 function viewProducts(){
   if(!S.products.length)return `<div class="empty"><h3>商品がまだありません</h3>
-    <p>商品は <b>TikTok Shop の商品リンクが付いた紹介動画</b> からだけ抽出します。
-    今回の収集ではリンク付きの動画が見つかりませんでした。</p></div>`;
+    <p>紹介動画のキャプション・タグ・商品リンクから商品名を取り出します。
+    今回の収集では商品名を特定できる動画が見つかりませんでした。</p></div>`;
   const toggle=`<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
     <input class="field" id="q" type="search" placeholder="商品名で絞り込み"
       value="${esc(S.q)}" aria-label="検索">
@@ -1166,7 +1180,7 @@ function renderDetail(row,h){
   const skip=new Set(["rank","total_views","related_videos","related_creators"]);
   const entries=Object.entries(met).filter(([k,v])=>v!==null&&v!==undefined&&!skip.has(k));
   const e=row?(row.extra||{}):{};
-  const vids=(e.top_videos||[]).slice(0,5);
+  const vids=(e.top_videos||[]).slice(0,10);
   const tags=(e.hashtags||[]).slice(0,10);
 
   $("dBody").innerHTML=`
@@ -1179,7 +1193,14 @@ function renderDetail(row,h){
       <div><div class="k">伸び率</div><div class="v">${pct(row.growth_rate)}</div></div>
       <div><div class="k">日次換算</div><div class="v">${pct(dailyOf(row))}</div></div>
     </div></div>`:""}
-    ${vids.length?`<div class="dsec"><h4>この判断の根拠になった動画</h4>
+    ${row&&(row.extra||{}).name_source?`<div class="dsec"><h4>商品名の出どころ</h4>
+      <div style="font-size:12px;color:var(--ink-2)">
+        ${srcBadge(row)}
+        ${(row.extra.name_source==="anchor")
+          ? "動画に付いていた TikTok Shop の商品リンクから取りました。"
+          : "動画の説明文・ハッシュタグから推定した名前です。正確な型番までは分からないので、下の動画で実物を確認してください。"}
+      </div></div>`:""}
+    ${vids.length?`<div class="dsec"><h4>この商品を紹介している動画（${vids.length} 本）</h4>
       <div class="proof">${vids.map(v=>`<a href="${esc(v.url||"#")}" target="_blank" rel="noopener">
         ${thumb("sm",v.name||"",v.thumbnail,null,null)}
         <div class="pmeta"><div class="pt">${esc(v.name||"")}</div>

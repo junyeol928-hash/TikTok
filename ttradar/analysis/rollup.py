@@ -112,33 +112,101 @@ def _sum(vals: Sequence[float]) -> float:
 
 def rollup_products(videos: Iterable[Snapshot], region: str,
                     source: str = "rollup",
-                    hit_bar: float | None = None) -> list[Snapshot]:
-    """商品リンク付き動画をまとめて PRODUCT スナップショットを作る."""
+                    hit_bar: float | None = None,
+                    min_confidence: float = 0.5) -> list[Snapshot]:
+    """紹介動画をまとめて PRODUCT スナップショットを作る.
+
+    商品リンク付きの動画だけでなく、キャプションから商品名を取り出せた
+    動画も対象にする。日本では Shop リンク付きの動画が少なく、
+    リンク必須にすると伸びている紹介動画の大半が捨てられてしまうため。
+
+    どこから取った名前か (``name_source``) と確からしさ (``confidence``) は
+    残して UI に出す。推定である以上、利用者が根拠の動画で確かめられる
+    ようにしておく必要がある。
+    """
     groups: dict[str, list[Snapshot]] = defaultdict(list)
     names: dict[str, str] = {}
     urls: dict[str, str] = {}
+    best_src: dict[str, tuple[float, str]] = {}   # key -> (confidence, source)
 
     for v in videos:
-        prod = (v.extra or {}).get("product")
-        if not isinstance(prod, dict):
-            continue
-        raw_name = prod.get("name")
-        if not raw_name or not is_valid_product(raw_name):
-            continue
-        key = product_key(raw_name)
-        groups[key].append(v)
-        # 表示名は最も長いものを採用 (省略された名前より情報が多い)
-        disp = normalize_product_name(raw_name)
-        if len(disp) > len(names.get(key, "")):
-            names[key] = disp
-        if prod.get("url") and key not in urls:
-            urls[key] = str(prod["url"])
+        for cand in _candidates_of(v):
+            raw_name = cand.get("name")
+            conf = float(cand.get("confidence") or 0)
+            if not raw_name or conf < min_confidence:
+                continue
+            if not is_valid_product(raw_name):
+                continue
+            key = product_key(raw_name)
+            if v not in groups[key]:
+                groups[key].append(v)
+            # 表示名は最も長いものを採用 (省略された名前より情報が多い)
+            disp = normalize_product_name(raw_name)
+            if len(disp) > len(names.get(key, "")):
+                names[key] = disp
+            src = str(cand.get("source") or "caption")
+            if conf > best_src.get(key, (0.0, ""))[0]:
+                best_src[key] = (conf, src)
+            if src == "anchor":
+                url = ((v.extra or {}).get("product") or {}).get("url")
+                if url and key not in urls:
+                    urls[key] = str(url)
+
+    _merge_subsumed(groups, names, best_src)
 
     out: list[Snapshot] = []
     for key, vids in groups.items():
-        out.append(_build(EntityType.PRODUCT, key, names[key], vids, region, source,
-                          url=urls.get(key), hit_bar=hit_bar))
+        snap = _build(EntityType.PRODUCT, key, names[key], vids, region, source,
+                      url=urls.get(key), hit_bar=hit_bar)
+        conf, src = best_src.get(key, (0.5, "caption"))
+        snap.extra["name_source"] = src
+        snap.extra["name_confidence"] = round(conf, 2)
+        out.append(snap)
     return out
+
+
+def _candidates_of(v: Snapshot) -> list[dict[str, Any]]:
+    """動画が紹介している商品の候補. 旧形式のデータとも互換を保つ."""
+    e = v.extra or {}
+    cands = e.get("product_candidates")
+    if isinstance(cands, list) and cands:
+        return [c for c in cands if isinstance(c, dict)]
+    # product_candidates が無い古いスナップショット向け
+    prod = e.get("product")
+    if isinstance(prod, dict) and prod.get("name"):
+        return [{"name": prod["name"], "confidence": 1.0, "source": "anchor"}]
+    return []
+
+
+def _merge_subsumed(groups: dict[str, list[Snapshot]], names: dict[str, str],
+                    best_src: dict[str, tuple[float, str]]) -> None:
+    """「収納ケース」と「ダイソーの収納ケース」を 1 つにまとめる.
+
+    片方の名前がもう片方に完全に含まれ、かつ **同じ動画を根拠にしている**
+    ときだけまとめる。名前が似ているだけで別の商品のことはあるので、
+    根拠の重なりを条件にする。まとめ先は長い方 (情報が多い方)。
+    """
+    keys = sorted(groups, key=len, reverse=True)
+    for short in list(keys):
+        if short not in groups:
+            continue
+        for long in keys:
+            if long == short or long not in groups or short not in groups:
+                continue
+            if short not in long:
+                continue
+            a = {id(v) for v in groups[short]}
+            b = {id(v) for v in groups[long]}
+            if not (a & b):
+                continue                      # 根拠が重ならないなら別物
+            for v in groups.pop(short):
+                if v not in groups[long]:
+                    groups[long].append(v)
+            names.pop(short, None)
+            sc = best_src.pop(short, None)
+            if sc and sc[0] > best_src.get(long, (0.0, ""))[0]:
+                best_src[long] = sc
+            break
 
 
 def rollup_creators(videos: Iterable[Snapshot], region: str,
@@ -244,7 +312,9 @@ def _build(etype: EntityType, native_id: str, name: str,
 
     # 代表動画 = 再生数が最大のもの。UI でサムネイルと「お手本」を出すのに使う
     best = max(vids, key=lambda v: v.metrics.get(M.VIEWS, 0.0))
-    top = sorted(vids, key=lambda v: v.metrics.get(M.VIEWS, 0.0), reverse=True)[:5]
+    # 「どの動画を参考にその商品が伸びていると判断したか」を見せるための一覧。
+    # 商品名がキャプションからの推定である以上、根拠は多めに出す。
+    top = sorted(vids, key=lambda v: v.metrics.get(M.VIEWS, 0.0), reverse=True)[:10]
 
     return Snapshot(
         entity_type=etype,
