@@ -33,6 +33,7 @@ import time
 from typing import Any, Iterable
 from urllib.parse import quote
 
+from ..analysis.category import is_food
 from ..models import EntityType, M, Snapshot
 from ..util.log import get
 from .base import Collector, dedupe, register
@@ -130,36 +131,77 @@ def extract_hashtags(item: dict[str, Any]) -> list[str]:
     return tags
 
 
+#: 商品リンクらしい URL
+_SHOP_URL_RE = re.compile(r"(/view/product|shop\.tiktok|/shop/|product_id|productId"
+                          r"|\bproduct\b|tiktokshop)", re.I)
+#: 商品名が入りうるキー
+_ANCHOR_NAME_KEYS = ("keyword", "title", "product_name", "productName",
+                     "name", "description")
+#: 商品 ID が入りうるキー
+_PRODUCT_ID_KEYS = ("product_id", "productId", "product_ids", "productIds")
+#: アンカーらしさを示す構造キー (種別だけで判断すると誤検出するため)
+_ANCHOR_SHAPE_KEYS = ("keyword", "schema", "icon", "extraInfo", "extra_info",
+                      "actionType", "action_type", "logExtra", "anchorType")
+
+
+def _anchor_name(d: dict[str, Any]) -> str | None:
+    for k in _ANCHOR_NAME_KEYS:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _anchor_url(d: dict[str, Any]) -> str:
+    for k in ("schema", "url", "link", "deep_link", "deepLink", "webUrl", "web_url"):
+        v = d.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+
+
 def extract_product_anchor(item: dict[str, Any]) -> dict[str, Any] | None:
     """動画に紐づく TikTok Shop 商品アンカーを取り出す.
 
     商品リンクが付いている動画は「その商品の紹介動画」であることが確定するので、
     商品トレンドを組み立てる際の最も信頼できる根拠になる。
+
+    キー名ではなく **形** で探す。TikTok はアンカーの置き場所
+    (``anchors`` / ``anchorInfo`` / ``shopInfo`` / さらに入れ子) を変えてくるため、
+    決め打ちだと商品が 1 件も取れない状態に静かに陥る。
+
+    「商品リンクだ」と判断する条件は、名前を持ったうえで次のいずれか:
+
+    - 種別が Shop 系で、かつアンカーらしい構造キーを持つ
+    - 商品 ID を持つ
+    - URL が商品ページらしい
+
+    種別だけで判断すると、``type: 2`` を持つ無関係な dict を拾ってしまう。
     """
-    for key in ("anchors", "anchor", "anchorInfo", "shopInfo"):
-        anchors = item.get(key)
-        if isinstance(anchors, dict):
-            anchors = [anchors]
-        if not isinstance(anchors, list):
+    fallback: dict[str, Any] | None = None
+    for d in _walk_dicts(item):
+        if not isinstance(d, dict):
             continue
-        for a in anchors:
-            if not isinstance(a, dict):
-                continue
-            atype = a.get("type") or a.get("anchorType")
-            keyword = (a.get("keyword") or a.get("title")
-                       or a.get("description") or a.get("name"))
-            if not keyword:
-                continue
-            try:
-                is_shop = int(atype) in SHOP_ANCHOR_TYPES
-            except (TypeError, ValueError):
-                is_shop = False
-            # 種別が判定できなくても、URL に shop が入っていれば商品とみなす
-            url = str(a.get("schema") or a.get("url") or a.get("link") or "")
-            if is_shop or "shop" in url.lower() or "product" in url.lower():
-                return {"name": str(keyword).strip(), "url": url or None,
-                        "anchor_type": atype}
-    return None
+        name = _anchor_name(d)
+        if not name:
+            continue
+
+        atype = d.get("type") or d.get("anchorType") or d.get("anchor_type")
+        try:
+            is_shop_type = int(atype) in SHOP_ANCHOR_TYPES
+        except (TypeError, ValueError):
+            is_shop_type = False
+        anchor_shaped = any(k in d for k in _ANCHOR_SHAPE_KEYS)
+        has_pid = any(d.get(k) for k in _PRODUCT_ID_KEYS)
+        url = _anchor_url(d)
+        shop_url = bool(url and _SHOP_URL_RE.search(url))
+
+        if has_pid or (is_shop_type and anchor_shaped):
+            return {"name": name, "url": url or None, "anchor_type": atype}
+        if shop_url and fallback is None:
+            # URL だけが根拠。より確実なものが後から見つかるかもしれないので保留
+            fallback = {"name": name, "url": url, "anchor_type": atype}
+    return fallback
 
 
 def product_intent_detail(desc: str, hashtags: list[str],
@@ -322,6 +364,17 @@ class TikTokVideoCollector(Collector):
         raw = self.config.raw.get("video_hashtags")
         return [str(h).lstrip("#") for h in raw] if isinstance(raw, list) else []
 
+    def max_age_days(self) -> float:
+        """何日前までの動画を対象にするか (0 で無制限).
+
+        トレンドを見るのが目的なので、既定は 60 日。
+        何ヶ月も前の動画は「今何が伸びているか」を歪めるだけになる。
+        """
+        try:
+            return max(0.0, float(self.config.raw.get("max_video_age_days", 30)))
+        except (TypeError, ValueError):
+            return 30.0
+
     def collect(self, region: str) -> list[Snapshot]:
         from playwright.sync_api import sync_playwright
 
@@ -408,7 +461,9 @@ class TikTokVideoCollector(Collector):
             browser.close()
 
         min_intent = float(self.config.raw.get("min_product_intent", 0.35))
-        skipped = 0
+        max_age_h = self.max_age_days() * 24.0
+        drop_food = bool(self.config.raw.get("exclude_food", True))
+        skipped = skipped_old = skipped_food = 0
         with_link = 0
         for raw in captured:
             try:
@@ -420,6 +475,16 @@ class TikTokVideoCollector(Collector):
             if float(snap.extra.get("product_intent") or 0) < min_intent:
                 skipped += 1
                 continue
+            # トレンドを見るので、何ヶ月も前の動画は対象にしない。
+            # 古い動画は再生数だけ積み上がっていて「今の勢い」を歪める。
+            age = snap.metrics.get(M.AGE_HOURS)
+            if max_age_h and age is not None and age > max_age_h:
+                skipped_old += 1
+                continue
+            if drop_food and is_food(snap.name, " ".join(snap.extra.get("hashtags") or []),
+                                     (snap.extra.get("product") or {}).get("name")):
+                skipped_food += 1
+                continue
             if snap.extra.get("product"):
                 with_link += 1
             snap.captured_at = captured_at
@@ -427,6 +492,10 @@ class TikTokVideoCollector(Collector):
 
         log.info("動画 %d 件を採用 (商品紹介らしさ %.2f 未満の %d 件を除外)",
                  len(out), min_intent, skipped)
+        if skipped_old:
+            log.info("  直近 %.0f 日より古い %d 件を除外", self.max_age_days(), skipped_old)
+        if skipped_food:
+            log.info("  食べ物系の %d 件を除外", skipped_food)
         if out:
             log.info("  うち %d 件は TikTok Shop の商品リンク付き "
                      "(どの商品の紹介動画かが確定する)", with_link)
@@ -437,9 +506,13 @@ class TikTokVideoCollector(Collector):
         self.stats = {
             "queries": [label for label, _ in targets],
             "min_product_intent": min_intent,
+            "max_age_days": self.max_age_days(),
+            "exclude_food": drop_food,
             "seen": len(captured),
             "kept": len(out),
             "skipped_not_product": skipped,
+            "skipped_old": skipped_old,
+            "skipped_food": skipped_food,
             "with_shop_link": with_link,
         }
 

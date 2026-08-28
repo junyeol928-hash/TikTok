@@ -144,6 +144,10 @@ class Api:
                 "products": len(digest.by_type.get(EntityType.PRODUCT, [])),
                 "queries": self._video_queries(),
                 "min_product_intent": self._min_intent(),
+                "max_age_days": digest.max_video_age_days,
+                "exclude_food": digest.exclude_food,
+                "excluded_old": digest.excluded_old,
+                "excluded_food": digest.excluded_food,
                 "last_run": db.get_meta("last_filter_stats"),
             }
 
@@ -354,6 +358,43 @@ class Api:
                 "series": series,
             }
 
+    #: アプリから変えられる設定と、その正規化のしかた
+    ALLOWED_AGE_DAYS = (7.0, 14.0, 30.0, 60.0, 90.0, 0.0)   # 0 = 無制限
+
+    def get_settings(self) -> dict[str, Any]:
+        """アプリ側で変更できる設定の現在値."""
+        with Database(self.cfg.db_path) as db:
+            r = Radar(self.cfg, db)
+            return {
+                "max_video_age_days": r.max_video_age_days(),
+                "exclude_food": r.exclude_food(),
+                "age_choices": list(self.ALLOWED_AGE_DAYS),
+            }
+
+    def save_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """アプリ側の設定を保存する.
+
+        config.yaml は書き換えず DB に持つ。利用者が YAML を触らずに
+        「直近何日を見るか」「食べ物を入れるか」を変えられるようにするため。
+        こちらが config.yaml より優先される。
+        """
+        with Database(self.cfg.db_path) as db:
+            cur = db.get_meta("ui_settings") or {}
+            if not isinstance(cur, dict):
+                cur = {}
+            if "max_video_age_days" in payload:
+                try:
+                    d = max(0.0, float(payload["max_video_age_days"]))
+                except (TypeError, ValueError):
+                    return {"ok": False, "reason": "期間の指定が不正です"}
+                if d not in self.ALLOWED_AGE_DAYS:
+                    return {"ok": False, "reason": "選べない期間です"}
+                cur["max_video_age_days"] = d
+            if "exclude_food" in payload:
+                cur["exclude_food"] = bool(payload["exclude_food"])
+            db.set_meta("ui_settings", cur)
+        return {"ok": True, **self.get_settings()}
+
     def watchlist(self) -> list[dict[str, Any]]:
         with Database(self.cfg.db_path) as db:
             return [dict(r) for r in db.list_watch()]
@@ -388,6 +429,8 @@ class Api:
             "video_queries": self._video_queries(),
             "min_product_intent": self._min_intent(),
             "strong_intent": STRONG_INTENT,
+            "max_video_age_days": float(self.cfg.raw.get("max_video_age_days", 60) or 0),
+            "exclude_food": bool(self.cfg.raw.get("exclude_food", True)),
             "alert_threshold": self.cfg.alert_threshold,
             "default_window": self.cfg.growth_window_hours,
             "my_niches": self.cfg.my_niches,
@@ -482,6 +525,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not key:
                     return self._error(400, "key が必要です")
                 return self._json(self.api.history(key))
+            if u.path == "/api/settings":
+                return self._json(self.api.get_settings())
             if u.path == "/api/watch":
                 return self._json({"rows": self.api.watchlist()})
             if u.path == "/api/job":
@@ -509,6 +554,8 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_run_collect, args=(self.cfg,),
                                  daemon=True).start()
                 return self._json({"ok": True})
+            if u.path == "/api/settings":
+                return self._json(self.api.save_settings(payload))
             if u.path == "/api/watch":
                 kind = payload.get("kind")
                 value = (payload.get("value") or "").strip()

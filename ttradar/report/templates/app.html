@@ -312,6 +312,12 @@ select.btn{appearance:none;padding-right:10px}
 .fstep.keep .v{color:var(--accent)}
 .focus-q{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:13px;
   padding-top:12px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-3)}
+.focus-set{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:13px;
+  padding-top:12px;border-top:1px solid var(--line);font-size:11.5px}
+.focus-set .lab{color:var(--ink-3);font-weight:700;margin-right:2px}
+.focus-set .segs{padding:2px}
+.focus-set .seg{padding:4px 9px;font-size:11.5px}
+.focus-note{font-size:11px;color:var(--ink-3);margin-top:9px}
 
 /* ---------------------------------------------------------------- 一覧・表 */
 .simple{display:flex;flex-direction:column}
@@ -464,6 +470,7 @@ const S = {
   view:"today", window:72, sort:"views", q:"",
   kind:"all", videoCounts:null,       // 商品紹介動画の絞り込み状態と内訳
   formats:null,                       // どういう型の紹介動画が伸びているか
+  settings:null,                      // 期間・食べ物の扱い (アプリから変更できる)
   meta:null, summary:null, products:[], videos:[], tags:[], creators:[],
   jobTimer:null, lastJob:0, tableMode:false,
 };
@@ -882,25 +889,74 @@ function focusPanel(){
   const f=(S.summary||{}).focus; if(!f)return "";
   const run=(f.last_run||{}).by_source||{};
   const col=run.tiktok_video||{};
-  const seen=col.seen, dropped=col.skipped_not_product;
+  const seen=col.seen;
+  /* 直近の収集で落とした本数と、いま画面に出す前に落とした本数を足す。
+     どちらも「対象から外した」という同じ意味なので分けても混乱するだけ。 */
+  const dropped=(col.skipped_not_product||0);
+  const old=(col.skipped_old||0)+(f.excluded_old||0);
+  const food=(col.skipped_food||0)+(f.excluded_food||0);
+  const days=f.max_age_days||0;
   const qs=(f.queries||[]).slice(0,12);
   const step=(k,v,sub,cls)=>`<div class="fstep ${cls||""}">
     <div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
+  const scope=[days?`直近 ${Math.round(days)} 日`:"期間の制限なし",
+               f.exclude_food===false?"食べ物も含む":"食べ物は除外"].join(" ／ ");
   return `<div class="focus">
     <div class="focus-h"><span>🎯</span><span>分析対象は商品紹介動画だけ</span>
-      <span class="sub">— 伸びている動画を無差別に集めてはいません</span></div>
+      <span class="sub">— ${esc(scope)}。伸びている動画を無差別に集めてはいません</span></div>
     <div class="funnel">
       ${seen!==undefined?step("検索でヒット",n(seen),"TikTok が返した動画"):""}
-      ${dropped!==undefined?step("商品紹介ではないと判定",n(dropped),
-        `紹介度 ${f.min_product_intent} 未満は除外`,"drop"):""}
+      ${dropped?step("商品紹介ではない",n(dropped),
+        `紹介度 ${f.min_product_intent} 未満`,"drop"):""}
+      ${old?step("古すぎる",n(old),`直近 ${Math.round(days)} 日より前`,"drop"):""}
+      ${food?step("食べ物系",n(food),"物ではないので除外","drop"):""}
       ${step("分析対象の紹介動画",n(f.videos),"ここから先が全ての集計","keep")}
       ${step("うち商品リンク付き",n(f.with_shop_link),"どの商品かが確定")}
       ${step("導出できた商品",n(f.products),"撮る候補")}
     </div>
     ${qs.length?`<div class="focus-q"><span>検索した語</span>
       ${qs.map(q=>`<span class="chip">${esc(q)}</span>`).join("")}
-      <span>（config.yaml の <code>video_queries</code> で変更できます）</span></div>`:""}
+      <span>（<code>config.yaml</code> の <code>video_queries</code> で変更できます）</span></div>`:""}
+    ${scopeControls()}
   </div>`;
+}
+
+/* 期間と食べ物の扱いはアプリから変えられるようにする。
+   config.yaml を開かせずに「直近1ヶ月だけ見たい」を実現するため。 */
+const AGE_CHOICES=[[7,"1週間"],[14,"2週間"],[30,"1ヶ月"],[60,"2ヶ月"],[90,"3ヶ月"],[0,"すべて"]];
+function scopeControls(){
+  const st=S.settings; if(!st)return "";
+  const cur=Number(st.max_video_age_days||0);
+  const food=st.exclude_food!==false;
+  return `<div class="focus-set">
+    <span class="lab">対象にする期間</span>
+    <div class="segs" role="group" aria-label="対象にする期間">
+      ${AGE_CHOICES.map(([v,l])=>`<button class="seg" data-age="${v}"
+        aria-pressed="${cur===v}">${l}</button>`).join("")}
+    </div>
+    <span class="lab">食べ物</span>
+    <div class="segs" role="group" aria-label="食べ物の扱い">
+      <button class="seg" data-food="1" aria-pressed="${food}">除外する</button>
+      <button class="seg" data-food="0" aria-pressed="${!food}">含める</button>
+    </div>
+    </div>${staleNote()}`;
+}
+/* 商品の集計は収集したときの期間で作られている。
+   画面の設定と食い違っているときだけ知らせる (常時出すと読み飛ばされる)。 */
+function staleNote(){
+  const st=S.settings, f=(S.summary||{}).focus; if(!st||!f)return "";
+  const col=((f.last_run||{}).by_source||{}).tiktok_video;
+  if(!col)return "";
+  const usedAge=Number(col.max_age_days), nowAge=Number(st.max_video_age_days||0);
+  const usedFood=col.exclude_food!==false, nowFood=st.exclude_food!==false;
+  if(!(Number.isFinite(usedAge)&&usedAge!==nowAge) && usedFood===nowFood) return "";
+  const label=v=>(AGE_CHOICES.find(c=>c[0]===v)||[0,v+"日"])[1];
+  return `<div class="focus-note">⚠️ いまの商品ランキングは
+    <b>${esc(label(usedAge))}${usedFood?"・食べ物は除外":"・食べ物も含む"}</b>
+    で集めた動画から作られています。
+    <b>${esc(label(nowAge))}${nowFood?"・食べ物は除外":"・食べ物も含む"}</b>
+    で作り直すには「収集する」を押してください。
+    （動画・タグ・投稿者はもう新しい設定で表示しています）</div>`;
 }
 
 /* ---------------------------------------------------------------- タグ / 人 */
@@ -1223,6 +1279,24 @@ function wire(){
     loadVideos().then(render);});
   const tb=$("tableBtn");
   if(tb)tb.addEventListener("click",()=>{S.tableMode=!S.tableMode; render();});
+  document.querySelectorAll(".seg[data-age]").forEach(b=>
+    b.addEventListener("click",async()=>{
+      const v=Number(b.dataset.age);
+      if(S.settings&&Number(S.settings.max_video_age_days||0)===v)return;
+      b.disabled=true;
+      const r=await post("/api/settings",{max_video_age_days:v});
+      if(r&&r.ok===false){ toast(r.reason||"設定を変更できませんでした"); b.disabled=false; return; }
+      await loadAll();
+    }));
+  document.querySelectorAll(".seg[data-food]").forEach(b=>
+    b.addEventListener("click",async()=>{
+      const v=b.dataset.food==="1";
+      if(S.settings&&(S.settings.exclude_food!==false)===v)return;
+      b.disabled=true;
+      const r=await post("/api/settings",{exclude_food:v});
+      if(r&&r.ok===false){ toast(r.reason||"設定を変更できませんでした"); b.disabled=false; return; }
+      await loadAll();
+    }));
   document.querySelectorAll(".seg[data-kind]").forEach(b=>
     b.addEventListener("click",()=>{ if(S.kind===b.dataset.kind)return;
       S.kind=b.dataset.kind;
@@ -1246,15 +1320,16 @@ async function loadAll(){
   const page=$("page"); page.classList.add("loading");
   try{
     const w=S.window;
-    const [sum,prod,tags,cre,fmt]=await Promise.all([
+    const [sum,prod,tags,cre,fmt,set]=await Promise.all([
       api(`/api/summary?window=${w}`),
       api(`/api/signals?window=${w}&type=product&limit=200`),
       api(`/api/signals?window=${w}&type=hashtag&limit=80`),
       api(`/api/signals?window=${w}&type=creator&limit=80`),
       api(`/api/formats?window=${w}`).catch(()=>null),
+      api("/api/settings").catch(()=>null),
     ]);
     S.summary=sum; S.products=prod.rows; S.tags=tags.rows; S.creators=cre.rows;
-    S.formats=fmt;
+    S.formats=fmt; S.settings=set;
     S.sort = S.sort||"views";
     await loadVideos();
     $("nProducts").textContent=S.products.length||"";

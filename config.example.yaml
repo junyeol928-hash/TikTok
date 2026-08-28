@@ -24,6 +24,10 @@ video_queries:                # TikTok 検索に投げるキーワード
   - 神アイテム
 video_hashtags: []            # ハッシュタグページも見に行く (例: [購入品紹介, 便利グッズ])
 min_product_intent: 0.35      # 商品紹介らしさがこれ未満の動画は集計から除外
+max_video_age_days: 30        # これより古い動画は見ない (トレンドを見るため。0 で無制限)
+                              #   アプリの「分析対象」パネルからも変更できます
+exclude_food: true            # 食べ物・飲み物の動画を分析対象から外す
+                              #   物を紹介したい人向け。食器・炊飯器などの「物」は残る
 
 limit_per_type: 50            # 1 種別あたりの取得件数
 period_days: 7                # Creative Center の集計期間 (7 / 30 / 120)

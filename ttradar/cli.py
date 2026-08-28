@@ -248,6 +248,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
           f"({res.duration:.1f}秒)")
     for src, n in sorted(res.by_source.items(), key=lambda x: -x[1]):
         print(f"  {src:<28} {n:>5} 件")
+    _print_filter_funnel(res)
     if res.errors:
         print("\n[エラー]")
         for e in res.errors:
@@ -256,6 +257,39 @@ def cmd_collect(args: argparse.Namespace) -> int:
         print("\n何も取得できませんでした。`ttradar doctor` で原因を確認してください。")
         return 1
     return 0
+
+
+def _print_filter_funnel(res: "RunResult") -> None:
+    """何を見て何を残したかを端末にも出す.
+
+    アプリを開かなくても「商品が 0 件なのはなぜか」がここで分かるようにする。
+    """
+    col = res.filter_stats.get("tiktok_video")
+    roll = res.filter_stats.get("rollup")
+    if not col:
+        return
+    print("\n[商品紹介動画の絞り込み]")
+    print(f"  検索でヒット              {col.get('seen', 0):>5} 件")
+    for key, label in (("skipped_not_product", "商品紹介ではない"),
+                       ("skipped_old", "古すぎる"),
+                       ("skipped_food", "食べ物系")):
+        n = col.get(key) or 0
+        if n:
+            print(f"    - {label:<20} {n:>5} 件を除外")
+    print(f"  分析対象の紹介動画        {col.get('kept', 0):>5} 件")
+    print(f"    うち商品リンク付き      {col.get('with_shop_link', 0):>5} 件")
+    if roll:
+        print(f"  導出できた商品            {roll.get('products', 0):>5} 件")
+
+    if not col.get("with_shop_link"):
+        print("\n  商品リンク付きの動画が 0 件でした。")
+        print("  商品は TikTok Shop の商品リンクが付いた紹介動画からだけ作るため、")
+        print("  この状態だと「今撮るべき商品」は出せません。次を試してください:")
+        print("    1. config.yaml の video_queries に自分のジャンルの語を足す")
+        print("       (例: コスメ 購入品 / ガジェット レビュー / 収納グッズ)")
+        print("    2. video_hashtags に [tiktokshop, 購入品紹介] を入れる")
+        print("    3. ttradar probe --visible で TikTok が何を返しているか確認する")
+        print("  動画・ハッシュタグ・クリエイターの分析はこの状態でも使えます。")
 
 
 def cmd_report(args: argparse.Namespace) -> int:

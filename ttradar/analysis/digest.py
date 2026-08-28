@@ -15,6 +15,7 @@ from ..db import Database
 from ..models import (PRIMARY_METRIC, EntityType, M, Snapshot, TrendSignal,
                       TrendStage)
 from ..util.log import get
+from .category import is_food
 from .metrics import GrowthResult, compute_growth, classify_stage
 from .rollup import rollup_all
 from .scoring import score_generic, score_product, score_video_product
@@ -52,6 +53,14 @@ class Digest:
     total_entities: int = 0
     #: 履歴が足りず伸び率を出せなかった件数 (初回実行時はこれが全件になる)
     insufficient_history: int = 0
+    #: 古すぎて対象外にした動画の件数
+    excluded_old: int = 0
+    #: 食べ物系として対象外にした件数
+    excluded_food: int = 0
+    #: 何日前までの動画を見ているか (0 で無制限)
+    max_video_age_days: float = 0.0
+    #: 食べ物を除外しているか
+    exclude_food: bool = True
 
     def top(self, etype: EntityType, n: int = 10) -> list[TrendSignal]:
         return self.by_type.get(etype, [])[:n]
@@ -104,6 +113,9 @@ class Radar:
         t0 = time.time()
         result = RunResult()
         run_id = self.db.start_run()
+        # collector は config.raw を直接読むので、アプリ側で変えた設定を先に流し込む
+        for key in self.UI_SETTING_KEYS:
+            self.config.raw[key] = self.setting(key, self.config.raw.get(key))
         collectors = self.build_collectors(sources)
         regions = list(regions) if regions else list(self.config.regions)
 
@@ -168,6 +180,13 @@ class Radar:
         window = window_hours if window_hours is not None else self.config.growth_window_hours
         now = time.time()
         digest = Digest(region=region, generated_at=now)
+        # 「いま何を対象にしているか」はデータが 1 件も無くても画面に出す。
+        # ここを早期 return の後ろに置くと、空の DB で「期間の制限なし」と
+        # 嘘の表示になる。
+        max_age_h = self.max_video_age_days() * 24.0
+        drop_food = self.exclude_food()
+        digest.max_video_age_days = self.max_video_age_days()
+        digest.exclude_food = drop_food
 
         # 直近 14 日以内に観測されたものだけを対象にする
         entities = self.db.active_entities(region=region, since=now - 14 * 86400)
@@ -179,6 +198,11 @@ class Radar:
         prepared: dict[EntityType, list[dict[str, Any]]] = {}
         for ent in entities:
             etype = EntityType(ent["entity_type"])
+            # 食べ物は除外する (物を紹介したい人にとってはノイズでしかなく、
+            # 食べ物は再生数が伸びやすいのでランキングを占領してしまう)
+            if drop_food and is_food(ent["name"], ent["category"]):
+                digest.excluded_food += 1
+                continue
             hist = self.db.history(ent["entity_key"], since=now - 30 * 86400)
             if not hist:
                 continue
@@ -194,6 +218,16 @@ class Radar:
             latest = hist[-1]
             import json as _json
             metrics = _json.loads(latest["metrics"] or "{}")
+
+            # 古い動画はトレンドではない。
+            # age_hours は取得時点の値なので、その後の経過分を足して今の年齢にする。
+            if max_age_h and etype == EntityType.VIDEO:
+                age = metrics.get(M.AGE_HOURS)
+                if age is not None:
+                    age += max(0.0, (now - float(ent["last_seen"])) / 3600.0)
+                    if age > max_age_h:
+                        digest.excluded_old += 1
+                        continue
 
             age_days = (now - float(ent["first_seen"])) / 86400.0
             is_new = (now - float(ent["first_seen"])) < NEW_WINDOW_HOURS * 3600 and len(series) <= 2
@@ -299,6 +333,34 @@ class Radar:
             digest.by_type[etype] = signals
 
         return digest
+
+    # ----------------------------------------------------- 実効設定
+    # アプリ上で変えた設定 (DB の ui_settings) を config.yaml より優先する。
+    # 利用者が YAML を編集しなくても期間や食べ物の扱いを変えられるようにするため。
+    UI_SETTING_KEYS = ("max_video_age_days", "exclude_food")
+
+    def ui_settings(self) -> dict[str, Any]:
+        try:
+            v = self.db.get_meta("ui_settings")
+        except Exception:
+            return {}
+        return v if isinstance(v, dict) else {}
+
+    def setting(self, key: str, default: Any) -> Any:
+        ui = self.ui_settings()
+        if key in ui and ui[key] is not None:
+            return ui[key]
+        return self.config.raw.get(key, default)
+
+    def max_video_age_days(self) -> float:
+        """何日前までの動画を分析対象にするか (0 で無制限)."""
+        try:
+            return max(0.0, float(self.setting("max_video_age_days", 30)))
+        except (TypeError, ValueError):
+            return 30.0
+
+    def exclude_food(self) -> bool:
+        return bool(self.setting("exclude_food", True))
 
     def _matches_niche(self, name: str, category: str | None) -> bool:
         """自分のニッチ (config.my_niches) に合致するか."""

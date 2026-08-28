@@ -247,6 +247,104 @@ def test_reach_tags_are_marked(seeded):
     assert all(v is not None for v in marks.values())
 
 
+def test_old_videos_are_excluded(cfg, tmp_path):
+    """何ヶ月も前の動画はトレンドではないので分析対象から外れること."""
+    import time
+    from ttradar.models import EntityType, M, Snapshot
+
+    now = time.time()
+
+    def vid(i, age_h):
+        return Snapshot(
+            entity_type=EntityType.VIDEO, native_id=f"v{i}",
+            name=f"神アイテム紹介 {i} 買ってよかった", source="tiktok_video",
+            metrics={M.VIEWS: 50_000.0 + i, M.AGE_HOURS: age_h},
+            region="JP", captured_at=now,
+            extra={"creator": "c1", "hashtags": ["購入品紹介"],
+                   "product_intent": 1.0,
+                   "product": {"name": f"商品{i}", "url": None}},
+        )
+
+    cfg.raw["max_video_age_days"] = 60
+    cfg.min_volume = 0
+    with Database(cfg.db_path) as db:
+        db.upsert_snapshots([vid(1, 10 * 24), vid(2, 200 * 24)])
+
+    rows = Api(cfg).videos(72, "JP", "views", None, 50)["rows"]
+    names = {r["name"] for r in rows}
+    assert any("1" in x for x in names), "10 日前の動画が消えている"
+    assert not any("2" in x for x in names), "200 日前の動画が残っている"
+
+    # 制限なしにすれば両方出る
+    cfg.raw["max_video_age_days"] = 0
+    assert len(Api(cfg).videos(72, "JP", "views", None, 50)["rows"]) == 2
+
+
+def test_food_is_excluded(cfg):
+    """食べ物は分析対象から外れ、食にまつわる『物』は残ること."""
+    import time
+    from ttradar.models import EntityType, M, Snapshot
+
+    now = time.time()
+
+    def prod(name):
+        return Snapshot(
+            entity_type=EntityType.PRODUCT, native_id=name, name=name,
+            source="rollup", metrics={M.VIEWS: 90_000.0, M.MEDIAN_VIEWS: 40_000.0,
+                                      M.VIDEO_COUNT: 5.0},
+            region="JP", captured_at=now, extra={},
+        )
+
+    cfg.min_volume = 0
+    with Database(cfg.db_path) as db:
+        db.upsert_snapshots([prod("コンビニスイーツ 食べ比べセット"),
+                             prod("北欧デザインの食器セット"),
+                             prod("充電式 毛玉取り器")])
+
+    names = {r["name"] for r in Api(cfg).signals(72, "JP", "product", None, None, 50)["rows"]}
+    assert "充電式 毛玉取り器" in names
+    assert "北欧デザインの食器セット" in names, "食器は物なので残すべき"
+    assert not any("スイーツ" in x for x in names)
+
+    cfg.raw["exclude_food"] = False
+    n2 = {r["name"] for r in Api(cfg).signals(72, "JP", "product", None, None, 50)["rows"]}
+    assert any("スイーツ" in x for x in n2), "設定で戻せること"
+
+
+def test_settings_round_trip(cfg):
+    """期間と食べ物の扱いをアプリから変えられること.
+
+    利用者に config.yaml を編集させずに済ませるための経路なので、
+    保存 → 読み出し → 分析への反映まで通しで確認する。
+    """
+    api = Api(cfg)
+    before = api.get_settings()
+    assert before["max_video_age_days"] == 30      # 既定は直近1ヶ月
+    assert before["exclude_food"] is True
+
+    r = api.save_settings({"max_video_age_days": 7, "exclude_food": False})
+    assert r["ok"] is True
+    after = api.get_settings()
+    assert after["max_video_age_days"] == 7
+    assert after["exclude_food"] is False
+
+    # 分析側にも効いていること (config.yaml ではなく DB の値が使われる)
+    f = api.summary(72, "JP")["focus"]
+    assert f["max_age_days"] == 7 and f["exclude_food"] is False
+
+    # 選べない値は弾く
+    bad = api.save_settings({"max_video_age_days": 3})
+    assert bad["ok"] is False
+    assert api.get_settings()["max_video_age_days"] == 7
+
+
+def test_summary_reports_scope(seeded):
+    f = Api(seeded).summary(72, "JP")["focus"]
+    assert f["max_age_days"] > 0
+    assert f["exclude_food"] is True
+    assert "excluded_old" in f and "excluded_food" in f
+
+
 def test_formats_endpoint(seeded):
     """『どういう型の紹介動画が伸びているか』の集計.
 

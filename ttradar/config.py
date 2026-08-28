@@ -26,6 +26,8 @@ RAW_ONLY_KEYS = {
     "video_queries",        # tiktok_video: 検索キーワード
     "video_hashtags",       # tiktok_video: 見に行くハッシュタグ
     "min_product_intent",   # tiktok_video: 商品紹介らしさの下限
+    "max_video_age_days",   # tiktok_video: 何日前までの動画を見るか
+    "exclude_food",         # tiktok_video: 食べ物系を分析対象から外すか
     "thirdparty_apis",      # thirdparty: 外部 API 定義
 }
 

@@ -137,6 +137,39 @@ def test_ascii_markers_match_as_words(desc, tags):
     assert product_intent_score(desc, tags, False) > 0.0
 
 
+@pytest.mark.parametrize("label,item", [
+    ("従来の anchors",
+     {"anchors": [{"type": 46, "keyword": "充電式 毛玉取り器",
+                   "schema": "https://shop.tiktok.com/view/product/17293"}]}),
+    ("入れ子",
+     {"anchorInfo": {"anchors": [{"type": 47, "keyword": "収納ボックス",
+                                  "schema": "aweme://shop/product?product_id=99"}]}}),
+    ("商品 ID だけ",
+     {"extra": {"deep": {"productId": "123", "title": "ミニ加湿器"}}}),
+    ("URL だけ",
+     {"foo": {"title": "ハンディファン",
+              "url": "https://www.tiktok.com/view/product/555"}}),
+])
+def test_anchor_is_found_by_shape(label, item):
+    """アンカーの置き場所が変わっても商品を取り出せること.
+
+    キー名を決め打ちすると、TikTok が構造を変えた瞬間に
+    商品が 1 件も取れない状態へ静かに陥る。
+    """
+    a = extract_product_anchor(item)
+    assert a and a["name"], label
+
+
+@pytest.mark.parametrize("item", [
+    # 種別が一致するだけの無関係な dict を拾ってはいけない
+    {"music": {"type": 2, "title": "流行りの曲",
+               "url": "https://sf.tiktok.com/music/1"}},
+    {"author": {"nickname": "someone"}, "desc": "ふつうの動画"},
+])
+def test_anchor_does_not_false_positive(item):
+    assert extract_product_anchor(item) is None
+
+
 def test_product_intent_detail_returns_evidence():
     """判定の根拠を返す. UI で「なぜ商品紹介と見なしたか」を出すのに使う."""
     score, words = product_intent_detail("【購入品紹介】買ってよかった", ["レビュー"], False)
