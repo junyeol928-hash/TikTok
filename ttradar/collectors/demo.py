@@ -55,6 +55,10 @@ CREATORS = [
 BASE_TAGS = ["購入品紹介", "買ってよかった", "正直レビュー", "便利グッズ",
              "おすすめ", "神アイテム", "時短", "暮らしを整える"]
 
+#: デモの動画がどの検索語で見つかったか (型の分析を意味あるものにする)
+DEMO_QUERIES = ["購入品紹介", "買ってよかった", "正直レビュー",
+                "おすすめ商品", "便利グッズ", "神アイテム"]
+
 CATEGORY_TAGS = {
     "生活": ["暮らし", "掃除グッズ"], "美容": ["美容", "コスメ", "スキンケア"],
     "ガジェット": ["ガジェット", "ハック"], "ホーム": ["インテリア", "収納"],
@@ -165,6 +169,11 @@ class DemoCollector(Collector):
                 # 3 本に 1 本はリンク無し (キャプション判定のみ) にする。
                 linked = (pi + i) % 3 != 0
                 caption = CAPTIONS[(pi + i) % len(CAPTIONS)].format(p=name)
+                # 実データでは動画ごとに「どの検索語で見つかったか」が違い、
+                # 紹介らしさの強さもばらつく。型の分析と絞り込みが
+                # デモでも意味を持つよう、そこを再現する。
+                query = DEMO_QUERIES[(pi * 2 + i) % len(DEMO_QUERIES)]
+                intent = 1.0 if linked else (0.5 if (pi + i) % 5 == 0 else 0.75)
                 out.append(Snapshot(
                     entity_type=EntityType.VIDEO,
                     native_id=vid,
@@ -181,9 +190,11 @@ class DemoCollector(Collector):
                         "hashtags": tags,
                         "product": ({"name": name, "url": None, "anchor_type": 2}
                                     if linked else None),
-                        "product_intent": 1.0 if linked else 0.65,
-                        "intent_words": ([] if linked else ["購入", "レビュー"]),
-                        "query": "購入品紹介",
+                        "product_intent": intent,
+                        "intent_words": ([] if linked
+                                         else ["購入", "レビュー"] if intent >= 0.65
+                                         else ["紹介"]),
+                        "query": query,
                         "create_time": captured - age_h * 3600,
                         "music": None,
                     },
