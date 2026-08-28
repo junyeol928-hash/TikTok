@@ -486,6 +486,27 @@ class TikTokVideoCollector(Collector):
     def _enough(self) -> int:
         return max(60, int(self.config.limit_per_type) * 4)
 
+    def _usable_count(self, captured: list[dict[str, Any]]) -> int:
+        """集めたもののうち、実際に分析対象になりそうな本数.
+
+        ハッシュタグページは人気順なので古い動画が大量に混ざる。
+        生の件数で打ち切ると「245 件集めたが 130 件は 30 日より古くて
+        使えない」ということが起きるので、投稿日時で先に数えておく。
+        """
+        max_age_h = self.max_age_days() * 24.0
+        now = time.time()
+        seen: set[str] = set()
+        n = 0
+        for it in captured:
+            vid = it.get("id") or it.get("itemId") or it.get("aweme_id")
+            if not vid or str(vid) in seen:
+                continue
+            seen.add(str(vid))
+            ct = _num(it.get("createTime") or it.get("create_time"))
+            if not max_age_h or not ct or (now - ct) / 3600.0 <= max_age_h:
+                n += 1
+        return n
+
     def collect(self, region: str) -> list[Snapshot]:
         from playwright.sync_api import sync_playwright
 
@@ -538,9 +559,11 @@ class TikTokVideoCollector(Collector):
 
             enough = self._enough()
             for label, url in targets:
-                if len(captured) >= enough:
-                    log.info("十分に集まったので残りのページは見ません (%d 件)",
-                             len(captured))
+                usable = self._usable_count(captured)
+                if usable >= enough:
+                    log.info("十分に集まったので残りのページは見ません "
+                             "(使えるもの %d 件 / 見つけた %d 件)",
+                             usable, len(captured))
                     break
                 current["q"] = label
                 try:
@@ -590,15 +613,23 @@ class TikTokVideoCollector(Collector):
             snap.captured_at = captured_at
             out.append(snap)
 
-        log.info("動画 %d 件を採用 (商品紹介らしさ %.2f 未満の %d 件を除外)",
-                 len(out), min_intent, skipped)
+        # 同じ動画が複数のタグ/検索に出てくるので、ここで重複を除く
+        out = dedupe(out)
+        with_link = sum(1 for s in out if (s.extra or {}).get("product"))
+        named = sum(1 for s in out if (s.extra or {}).get("product_candidates"))
+
+        log.info("見つけた動画 %d 件 → 分析対象 %d 件", len(captured), len(out))
+        if skipped:
+            log.info("  商品紹介ではない          %d 件を除外 (紹介度 %.2f 未満)",
+                     skipped, min_intent)
         if skipped_old:
-            log.info("  直近 %.0f 日より古い %d 件を除外", self.max_age_days(), skipped_old)
+            log.info("  直近 %.0f 日より古い        %d 件を除外",
+                     self.max_age_days(), skipped_old)
         if skipped_food:
-            log.info("  食べ物系の %d 件を除外", skipped_food)
+            log.info("  食べ物系                  %d 件を除外", skipped_food)
         if out:
-            log.info("  うち %d 件は TikTok Shop の商品リンク付き "
-                     "(どの商品の紹介動画かが確定する)", with_link)
+            log.info("  商品名が分かったもの      %d 件 "
+                     "(うち商品リンク付き %d 件)", named, with_link)
 
         # 「何を見て、何を落としたか」を UI に出せるように残す。
         # 商品紹介動画だけを見ていることを利用者が確認できないと、
@@ -638,7 +669,7 @@ class TikTokVideoCollector(Collector):
                             "(ログイン壁・自動操作判定の可能性)")
             log.warning("  原因を詳しく調べるには: ttradar probe --visible")
 
-        return dedupe(out)
+        return out
 
     def _scroll(self, page: Any) -> None:
         """スクロールして追加の item_list をロードさせる."""

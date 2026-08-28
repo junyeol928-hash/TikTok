@@ -204,6 +204,42 @@ def test_unrelated_api_is_not_intercepted(url):
     assert not is_item_list_url(url)
 
 
+def test_early_stop_counts_usable_videos():
+    """打ち切りの判定は「使える本数」で行うこと.
+
+    ハッシュタグページは人気順なので古い動画が大量に混ざる。
+    生の件数で打ち切ると「245 件集めたが 130 件は古くて使えない」
+    という取りこぼしが起きる。
+    """
+    from ttradar.collectors.tiktok_video import TikTokVideoCollector
+    from ttradar.config import Config
+
+    c = TikTokVideoCollector(Config())
+    c.config.raw["max_video_age_days"] = 30
+    now = time.time()
+    fresh = [{"id": str(i), "createTime": int(now - 5 * 86400)} for i in range(50)]
+    stale = [{"id": str(1000 + i), "createTime": int(now - 200 * 86400)}
+             for i in range(130)]
+    dups = [{"id": "1", "createTime": int(now - 5 * 86400)} for _ in range(20)]
+
+    assert c._usable_count(fresh + stale + dups) == 50, "古い動画や重複を数えている"
+    # 期間の制限が無ければ全部が対象 (重複は除く)
+    c.config.raw["max_video_age_days"] = 0
+    assert c._usable_count(fresh + stale + dups) == 180
+
+
+def test_collector_dedupes_across_pages():
+    """同じ動画が複数のタグに出てきても 1 本として数えること."""
+    from ttradar.collectors.base import dedupe
+
+    def v(i):
+        return Snapshot(entity_type=EntityType.VIDEO, native_id=str(i),
+                        name="x", source="tiktok_video",
+                        metrics={M.VIEWS: 1.0}, region="JP")
+
+    assert len(dedupe([v(1), v(2), v(1), v(3), v(2)])) == 3
+
+
 def test_hashtag_pages_come_before_search():
     """検索は未ログインだと弾かれるので、タグページを先に見る."""
     from ttradar.collectors.tiktok_video import TikTokVideoCollector

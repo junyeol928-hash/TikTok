@@ -372,6 +372,13 @@ def rollup_all(videos: Sequence[Snapshot], region: str) -> list[Snapshot]:
     out += rollup_products(videos, region, hit_bar=hit_bar)
     out += rollup_creators(videos, region, hit_bar=hit_bar)
     out += rollup_hashtags(videos, region, hit_bar=hit_bar)
-    log.info("動画 %d 件から %d 件を導出 (商品/クリエイター/タグ)",
-             len(videos), len(out))
+    # 何件出たかではなく「商品が何件出たか」が知りたい情報なので分けて出す
+    n_prod = sum(1 for s in out if s.entity_type == EntityType.PRODUCT)
+    n_cre = sum(1 for s in out if s.entity_type == EntityType.CREATOR)
+    n_tag = sum(1 for s in out if s.entity_type == EntityType.HASHTAG)
+    log.info("動画 %d 件 → 商品 %d 件 / 投稿者 %d 人 / タグ %d 個",
+             len(videos), n_prod, n_cre, n_tag)
+    if not n_prod:
+        log.warning("  商品名を取り出せた動画がありませんでした。"
+                    "video_queries に自分のジャンルの語を足してみてください")
     return out

@@ -99,7 +99,14 @@ class Scheduler(threading.Thread):
             except Exception:  # noqa: BLE001 - スレッドを死なせない
                 log.exception("定期収集が失敗しました")
             wait = self._next_wait()
-            log.info("次の収集は %.0f 分後です", wait / 60)
+            rounds = self._rounds()
+            if rounds < self.WARMUP_ROUNDS:
+                log.info("次の収集は %.0f 分後です "
+                         "(履歴 %d 回分。%d 回貯まるまで短い間隔で集めます)",
+                         wait / 60, rounds, self.WARMUP_ROUNDS)
+            else:
+                log.info("次の収集は %.0f 分後です (履歴は十分に貯まっています)",
+                         wait / 60)
 
     def stop(self) -> None:
         self._stop.set()
