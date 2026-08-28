@@ -541,7 +541,7 @@ const VIEWS = {
   videos:   {title:"動画",         sub:"いま伸びている商品紹介動画そのもの"},
   hashtags: {title:"ハッシュタグ", sub:"伸びている紹介動画が実際に使っているタグ"},
   creators: {title:"クリエイター", sub:"同じジャンルで結果を出している投稿者"},
-  map:      {title:"機会マップ",   sub:"競合の少なさ × 伸び率。左上が狙い目"},
+  map:      {title:"機会マップ",   sub:"競合の少なさ × 勢い。左上が狙い目"},
 };
 
 function setView(v){
@@ -607,9 +607,9 @@ function viewToday(){
         <div class="hstat"><div class="k">紹介動画</div>
           <div class="v">${n(m.video_count)}<span style="font-size:13px">本</span></div>
           <div class="s">投稿者 ${n(m.creator_count)} 人</div></div>
-        <div class="hstat"><div class="k">再現性</div>
-          <div class="v">${rate(m.hit_rate,0)}</div>
-          <div class="s">平均超えの割合</div></div>
+        <div class="hstat"><div class="k">${m.velocity?"勢い（時速）":"再現性"}</div>
+          <div class="v">${m.velocity?n(m.velocity):rate(m.hit_rate,0)}</div>
+          <div class="s">${m.velocity?"1本あたりの伸び速度":"平均超えの割合"}</div></div>
       </div>
       <div class="hero-tags"><span class="lab">使うタグ</span>
         ${tags.map(t=>`<button class="chip tag" data-tag="${esc(t.tag)}">#${esc(t.tag)}</button>`).join("")}
@@ -663,8 +663,7 @@ function productRow(r,rank){
     </div>
     <div class="pscore"><b>${Math.round(r.score)}</b>
       <div class="meter"><i style="width:${Math.max(3,Math.round(r.score))}%"></i></div>
-      <span style="font-size:10px;color:var(--ink-3)">${r.growth_rate!==null&&r.growth_rate!==undefined
-        ? `<span class="${r.growth_rate>0?"up":r.growth_rate<0?"down":""}">${pct(r.growth_rate)}</span>` : "履歴待ち"}</span>
+      <span style="font-size:10px;color:var(--ink-3)">${growthOrVelocity(r)}</span>
     </div>
   </div>`;
 }
@@ -785,6 +784,20 @@ function viewMap(){
 /* ---------------------------------------------------------------- 散布図
    単一系列＋減色の「強調」表現。カテゴリ配色を使わないので
    色覚上の識別問題が原理的に発生しない。                              */
+/* 伸び率が出せない初回でも、時速 (再生数÷投稿からの経過時間) は出せる。
+   「履歴待ち」とだけ表示すると分析に見えないので、代わりに勢いを見せる。 */
+function growthOrVelocity(r){
+  if(r.growth_rate!==null&&r.growth_rate!==undefined){
+    const c=r.growth_rate>0?"up":r.growth_rate<0?"down":"";
+    return `<span class="${c}">${pct(r.growth_rate)}</span>`;
+  }
+  const v=(r.metrics||{}).velocity;
+  if(v) return `<span title="投稿からの経過時間あたりの再生数">時速 ${n(v)}</span>`;
+  return "履歴待ち";
+}
+function hasAnyGrowth(rows){
+  return rows.some(r=>r.growth_rate!==null&&r.growth_rate!==undefined);
+}
 function competitionOf(r){
   const m=r.metrics||{};
   const v=(m.video_count!==undefined)?m.video_count
@@ -796,14 +809,22 @@ function dailyOf(r){
   const h=r.window_hours||S.window||24;
   return r.growth_rate*(24/Math.max(h,1));
 }
+/* 縦軸に何を使うか。履歴が貯まる前は伸び率が出ないので時速で代用する。
+   軸が空のグラフを見せるより、初回から意味のある散らばりを見せる。 */
+function mapYMode(rows){ return hasAnyGrowth(rows) ? "growth" : "velocity"; }
+function mapY(r, mode){
+  return mode==="growth" ? dailyOf(r) : ((r.metrics||{}).velocity || 0);
+}
 function drawScatter(){
   const svg=$("scatter"); if(!svg)return;
   svg.innerHTML="";
+  const yMode=mapYMode(S.products);
   const pts=S.products.filter(r=>competitionOf(r)!==null
-    && r.growth_rate!==null && r.growth_rate!==undefined);
+    && (yMode==="velocity" ? ((r.metrics||{}).velocity||0)>0
+                           : (r.growth_rate!==null&&r.growth_rate!==undefined)));
   const note=$("mapNote");
   if(!pts.length){ svg.style.height="0px";
-    if(note)note.textContent="競合数と伸び率の両方が揃ったデータがまだありません。収集を重ねると表示されます。";
+    if(note)note.textContent="紹介動画の本数と勢いが揃った商品がまだありません。収集を重ねると表示されます。";
     return; }
   const excluded=S.products.length-pts.length;
   if(note)note.textContent=excluded>0?`${excluded} 件は伸び率が未計算のため未表示です。`:"";
@@ -811,7 +832,8 @@ function drawScatter(){
   const W=svg.clientWidth||900,H=340,m={t:20,r:20,b:44,l:64};
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.style.height=H+"px";
 
-  const xs=pts.map(p=>Math.max(1,competitionOf(p))), ys=pts.map(dailyOf);
+  const xs=pts.map(p=>Math.max(1,competitionOf(p)));
+  const ys=pts.map(p=>mapY(p,yMode));
   const xMin=Math.log10(Math.min(...xs)); let xMax=Math.log10(Math.max(...xs));
   if(xMax-xMin<0.3)xMax=xMin+0.3;
   const yLo=Math.min(0,...ys); let yHi=Math.max(...ys);
@@ -835,7 +857,7 @@ function drawScatter(){
     const y=Y(v);
     el("line",{x1:m.l,y1:y,x2:W-m.r,y2:y,stroke:grid,"stroke-width":1},svg);
     el("text",{x:m.l-9,y:y+3.5,"text-anchor":"end","font-size":10,fill:muted},svg)
-      .textContent=Math.round(v*100)+"%";
+      .textContent=(yMode==="growth")?(Math.round(v*100)+"%"):n(v);
   }
   el("line",{x1:m.l,y1:Y(0),x2:W-m.r,y2:Y(0),stroke:axis,"stroke-width":1},svg);
   el("line",{x1:X(xMed),y1:m.t,x2:X(xMed),y2:H-m.b,stroke:axis,"stroke-width":1},svg);
@@ -849,10 +871,10 @@ function drawScatter(){
     .textContent="紹介動画の本数（対数スケール）";
   el("text",{"font-size":10.5,fill:muted,"text-anchor":"middle",
     transform:`translate(15 ${(m.t+(H-m.b))/2}) rotate(-90)`},svg)
-    .textContent="日次の伸び率";
+    .textContent=(yMode==="growth")?"日次の伸び率":"勢い（時速の再生数）";
 
   [...pts].sort((a,b)=>a.score-b.score).forEach(p=>{
-    const c=competitionOf(p),g=dailyOf(p);
+    const c=competitionOf(p),g=mapY(p,yMode);
     const hot=c<=xMed&&g>0;
     const r=5+Math.sqrt(Math.max(0,p.score)/100)*8;
     const gg=el("g",{},svg);
@@ -862,13 +884,13 @@ function drawScatter(){
       style:"cursor:pointer"},gg);
     hit.addEventListener("mouseenter",ev=>showTip(
       `<b>${esc(p.name)}</b><div class="r">${p.stage_emoji} ${esc(p.stage_label)} ・ スコア ${Math.round(p.score)}</div>
-       <div class="r">日次 ${pct(g)} ／ 紹介動画 ${n(c)}本 ／ 中央値 ${n((p.metrics||{}).median_views)}再生</div>`,
+       <div class="r">${yMode==="growth"?"日次 "+pct(g):"時速 "+n(g)} ／ 紹介動画 ${n(c)}本 ／ 中央値 ${n((p.metrics||{}).median_views)}再生</div>`,
       ev.clientX,ev.clientY));
     hit.addEventListener("mouseleave",hideTip);
     hit.addEventListener("click",()=>openDetail(p.entity_key));
   });
   [...pts].sort((a,b)=>b.score-a.score).slice(0,4).forEach(p=>{
-    const c=competitionOf(p),g=dailyOf(p);
+    const c=competitionOf(p),g=mapY(p,yMode);
     const r=5+Math.sqrt(Math.max(0,p.score)/100)*8;
     const lab=p.name.length>13?p.name.slice(0,12)+"…":p.name;
     const w=lab.length*7.4; let tx=X(c),ty=Y(g)-r-8,an="middle";

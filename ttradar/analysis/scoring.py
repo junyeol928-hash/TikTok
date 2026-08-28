@@ -308,6 +308,7 @@ def score_video_product(
     median_views_cohort: Sequence[float],
     weights: "VideoProductWeights",
     niche_match: bool = False,
+    velocity_cohort: Sequence[float] = (),
 ) -> tuple[float, list[str]]:
     """実際の紹介動画から導出した商品のスコア.
 
@@ -362,17 +363,29 @@ def score_video_product(
     if creators is not None and n_vid and creators <= 2 and n_vid >= 4:
         reasons.append(f"投稿者は {creators:.0f} 人だけ — 一人が量産しているだけの可能性")
 
-    # --- 伸び (前回収集との差分) ---
-    daily = growth.daily_rate if growth.daily_rate is not None else 0.0
-    if growth.from_zero and growth.daily_rate is None:
+    # --- 伸び ---
+    # 前回収集との差分が使えるならそれを使う。
+    # 収集 1 回目は差分が取れないが、TikTok は各動画の投稿日時を返すので
+    # 「再生数 / 投稿からの経過時間」= 時速 が初回から計算できる。
+    # これを伸びの代理指標にすることで、1 回目から意味のある順位が出る。
+    daily = growth.daily_rate
+    vel = metrics.get(M.VELOCITY)
+    if daily is None and vel is not None and velocity_cohort:
+        growth_score = percentile_rank(vel, velocity_cohort)
+        reasons.append(f"代表的な1本が時速 {_fmt_num(vel)} 再生"
+                       f"（収集1回目のため前回比はまだ出せません）")
+    elif growth.from_zero and daily is None:
         growth_score = 1.0
         reasons.append("今回初めて観測された商品")
     else:
+        daily = daily or 0.0
         growth_score = saturating(daily, scale=0.5)
         if daily >= 0.3:
             reasons.append(f"紹介動画の再生が急増: 日次 {_fmt_pct(daily)}")
         elif daily < -0.1:
             reasons.append(f"勢いが落ちている: 日次 {_fmt_pct(daily)}")
+        if vel:
+            reasons.append(f"代表的な1本が時速 {_fmt_num(vel)} 再生")
 
     stage_score = {
         TrendStage.EMERGING: 1.0, TrendStage.NEW: 0.85, TrendStage.RISING: 0.85,

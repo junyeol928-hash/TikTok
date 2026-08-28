@@ -215,7 +215,11 @@ def _build(etype: EntityType, native_id: str, name: str,
     if srates:
         metrics[M.SAVE_RATE] = _median(srates)
     if vels:
-        metrics[M.VELOCITY] = _sum(vels)
+        # 中央値を使う。合計だと動画本数が多いだけの商品が
+        # 「勢いがある」と誤読される (46本の商品が4本の商品に20倍差をつけてしまう)。
+        # 知りたいのは「その商品の代表的な1本がどれだけの速さで伸びるか」。
+        metrics[M.VELOCITY] = _median(vels)
+        metrics[M.TOTAL_VELOCITY] = _sum(vels)
     if hit_bar is not None and views:
         # 全体の中央値を超えた本数の割合。「まぐれの1本」と「安定して伸びる商品」を分ける
         metrics[M.HIT_RATE] = sum(1 for v in views if v >= hit_bar) / len(views)

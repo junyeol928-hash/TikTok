@@ -196,6 +196,8 @@ class Radar:
             comp_cohort = [c for c in comp_cohort if c is not None]
             median_cohort = [r["metrics"].get(M.MEDIAN_VIEWS) for r in rows]
             median_cohort = [c for c in median_cohort if c is not None]
+            vel_cohort = [r["metrics"].get(M.VELOCITY) for r in rows]
+            vel_cohort = [c for c in vel_cohort if c is not None]
 
             signals: list[TrendSignal] = []
             for r in rows:
@@ -219,6 +221,7 @@ class Radar:
                         median_views_cohort=median_cohort,
                         weights=self.config.video_product_weights,
                         niche_match=niche,
+                        velocity_cohort=vel_cohort,
                     )
                 elif etype == EntityType.PRODUCT:
                     score, reasons = score_product(

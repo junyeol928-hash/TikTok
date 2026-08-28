@@ -94,7 +94,8 @@ class M:
     TOTAL_VIEWS = "total_views"         # 紹介動画の合計再生数
     MEDIAN_VIEWS = "median_views"       # 紹介動画の再生数の中央値
     AGE_HOURS = "age_hours"             # 投稿からの経過時間
-    VELOCITY = "velocity"               # 再生数 / 経過時間 (時速)
+    VELOCITY = "velocity"               # 代表的な1本の時速 (再生数 / 経過時間)
+    TOTAL_VELOCITY = "total_velocity"   # 紹介動画全体の時速合計
     HIT_RATE = "hit_rate"               # 全体中央値を超えた動画の割合 = 再現性
 
 
