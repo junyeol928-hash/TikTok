@@ -427,6 +427,7 @@ TikTok 側に負荷をかけるだけです。
 | `ttradar serve --interval 120` | **アプリを起動し、自動で収集し続ける** |
 | `ttradar demo` | オフラインのサンプルで動作体験 |
 | `ttradar collect` | 収集して DB に保存 |
+| `ttradar login` | TikTok にログインした状態を覚えさせる (0件が続くとき) |
 | `ttradar probe --visible` | 0 件のとき、TikTok から実際に何が返っているか調べる |
 | `ttradar report --html` | 分析して表示 + HTML レポート出力 |
 | `ttradar report --json` | JSON で出力 (他ツール連携用) |
@@ -435,6 +436,31 @@ TikTok 側に負荷をかけるだけです。
 | `ttradar watch` | 追跡リストの管理 |
 | `ttradar sources` | 利用可能な収集元の一覧 |
 | `ttradar prune` | 古いデータを削除 |
+
+---
+
+## 収集が 0 件になるとき
+
+TikTok が動画一覧を返していません。ログにこう出ていたら、その状態です。
+
+```
+動画 0 件を採用
+動画一覧の通信を1件も受け取れませんでした。
+  画面の文言: ... 不明なエラーが発生しました ... ログイン
+```
+
+未ログインだと検索結果を出さないことがあります。順に試してください。
+
+1. **`login.bat` をダブルクリック** (`ttradar login`)
+   TikTok がブラウザで開くので、いつものアカウントでログインし、
+   黒い画面で Enter を押します。ログイン状態は
+   `data/browser-profile/` に残り、次からの収集で使われます。
+   Cookie を DevTools から写す必要はありません。
+2. **時間を空けて再実行する** — 短時間に何度も叩くと弾かれます。
+3. **`probe.bat`** で TikTok が実際に何を返しているか確認する。
+
+なお ttradar は検索ページより先に **ハッシュタグページ**
+(`tiktok.com/tag/購入品紹介` など) を見に行きます。検索より通りやすいためです。
 
 ---
 

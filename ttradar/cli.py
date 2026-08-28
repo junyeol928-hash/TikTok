@@ -289,7 +289,56 @@ def _print_filter_funnel(res: "RunResult") -> None:
         print("       (例: コスメ 購入品 / ガジェット レビュー / 収納グッズ)")
         print("    2. video_hashtags に [tiktokshop, 購入品紹介] を入れる")
         print("    3. ttradar probe --visible で TikTok が何を返しているか確認する")
+        print("    4. 0 件が続くなら login.bat (ttradar login) でログインする")
         print("  動画・ハッシュタグ・クリエイターの分析はこの状態でも使えます。")
+
+
+def cmd_login(args: argparse.Namespace) -> int:
+    """TikTok にログインした状態をブラウザに覚えさせる.
+
+    TikTok は未ログインだと検索結果を返さないことがある。
+    Cookie を DevTools から手で写すのは現実的でないので、
+    保存されるプロフィールでブラウザを開き、そこでログインしてもらう。
+    一度やれば以降の収集でもその状態が使われる。
+    """
+    cfg = Config.load(args.config)
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("playwright が入っていません。先に setup を実行してください。")
+        return 1
+    from .collectors.tiktok_video import open_browser
+
+    cfg.headless = False          # ログインするので必ず表示する
+    print("\nTikTok をブラウザで開きます。")
+    print("  1. 開いた画面で、いつも使っているアカウントでログインしてください")
+    print("  2. ログインできたら、このウィンドウで Enter を押してください")
+    print("     (ブラウザは自動で閉じます)\n")
+    with sync_playwright() as pw:
+        ctx = open_browser(pw, cfg)
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        try:
+            page.goto("https://www.tiktok.com/login", timeout=60_000)
+        except Exception as e:  # noqa: BLE001
+            print(f"ページを開けませんでした: {e}")
+        try:
+            input("ログインが終わったら Enter: ")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        logged = False
+        try:
+            names = {c["name"] for c in ctx.cookies()}
+            logged = "sessionid" in names or "sessionid_ss" in names
+        except Exception:  # noqa: BLE001
+            pass
+        ctx.close()
+
+    if logged:
+        print("\nログイン状態を保存しました。次から収集に使われます。")
+        return 0
+    print("\nログインが確認できませんでした。もう一度お試しください。")
+    print("(ログインしなくても収集は動きますが、0 件になることがあります)")
+    return 1
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -533,6 +582,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="ページを開いてから記録する秒数")
     s.add_argument("--out", help="結果の書き出し先")
     s.set_defaults(func=cmd_probe)
+
+    s = sub.add_parser("login",
+                       help="TikTok にログインした状態を覚えさせる (0件のとき)")
+    s.set_defaults(func=cmd_login)
 
     s = sub.add_parser("serve", help="ブラウザで見るダッシュボードを起動する")
     s.add_argument("--port", "-p", type=int, default=8765)

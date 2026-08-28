@@ -120,6 +120,10 @@ class Config:
     top_n: int = 15
     report_dir: str = "reports"
     db_path: str = "data/ttradar.db"
+    #: ブラウザのプロフィール置き場。
+    #: ここに TikTok のログイン状態が残るので、一度ログインすれば
+    #: 以降の収集でも使い回せる (Cookie を手で写す必要がない)。
+    browser_profile_dir: str = "data/browser-profile"
     #: 通知チャンネル (slack / discord / email / file)
     notify_channels: list[str] = field(default_factory=list)
 

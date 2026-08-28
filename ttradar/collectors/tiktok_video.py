@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
 
@@ -47,12 +48,18 @@ DEFAULT_QUERIES: list[str] = [
     "便利グッズ", "神アイテム", "レビュー", "開封",
 ]
 
-#: 傍受対象の XHR。ここに出てくるものが動画リストを含む
-ITEM_LIST_MARKERS = (
-    "/api/search/general/full", "/api/search/item", "/api/challenge/item_list",
-    "/api/post/item_list", "/api/recommend/item_list", "/api/explore/item_list",
-    "/api/search/general/preview",
-)
+#: 傍受対象の XHR。ここに出てくるものが動画リストを含む。
+#: パスを決め打ちすると TikTok が置き場所を変えたときに静かに 0 件になる。
+#: 実際 ``/api/prefetch/explore/item_list/`` は決め打ちの一覧から漏れていた。
+#: 「item_list を含む」「検索系」という *形* で拾う。
+_ITEM_LIST_RE = re.compile(
+    r"(item_list|/api/search/(general|item)|/api/recommend/|"
+    r"/api/challenge/|/api/post/|/aweme/v1/.*(feed|search))", re.I)
+
+
+def is_item_list_url(url: str) -> bool:
+    """動画リストを含みうる API 通信か."""
+    return bool(_ITEM_LIST_RE.search(url or ""))
 
 #: 商品紹介っぽさを判定するための語 (キャプション/ハッシュタグに対して)。
 #: 日本語は語境界が無いので部分一致で判定する。
@@ -337,6 +344,68 @@ def parse_item(item: dict[str, Any], region: str, source: str,
     )
 
 
+def open_browser(pw: Any, config: Any) -> Any:
+    """TikTok 用のブラウザを開く.
+
+    **プロフィールを保存する形で開く。**
+    こうすると一度ログインすればその状態が残り、次回以降の収集でも使える。
+    TikTok は未ログインだと検索結果を返さないことがあり、
+    かといって Cookie を DevTools から手で写すのは現実的でないため。
+
+    戻り値は :class:`BrowserContext`。呼び出し側が ``close()`` する。
+    """
+    profile = Path(getattr(config, "browser_profile_dir", "data/browser-profile"))
+    profile.mkdir(parents=True, exist_ok=True)
+    return pw.chromium.launch_persistent_context(
+        str(profile),
+        headless=bool(getattr(config, "headless", False)),
+        locale="ja-JP", timezone_id="Asia/Tokyo",
+        viewport={"width": 1400, "height": 900},
+        args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+    )
+
+
+#: TikTok が「見せない」ときに画面に出る文言
+_BLOCK_HINTS = (
+    ("ログイン", "login"),
+    ("不明なエラー", "error"),
+    ("しばらくしてからもう一度", "error"),
+    ("something went wrong", "error"),
+    ("captcha", "captcha"),
+    ("認証", "captcha"),
+    ("アクセスできません", "blocked"),
+    ("access denied", "blocked"),
+)
+
+
+def diagnose_block(page_hint: str) -> list[str]:
+    """0 件だったときに、次に何をすればいいかを日本語で返す.
+
+    URL の一覧を出しても利用者には次の一手が分からない。
+    画面に出ていた文言から状況を見分けて、具体的な操作を出す。
+    """
+    hay = (page_hint or "").lower()
+    kinds = {kind for word, kind in _BLOCK_HINTS if word.lower() in hay}
+    if not kinds:
+        return []
+
+    out = ["★ TikTok が動画一覧を返していません。"]
+    if "captcha" in kinds:
+        out += ["  認証 (CAPTCHA) が出ています。",
+                "  開いたブラウザ画面で認証を手動で通してから、もう一度実行してください。"]
+    if "login" in kinds or "error" in kinds:
+        out += ["  ログインを求められている / エラー画面が出ています。",
+                "  未ログインだと検索結果を出さないことがあります。次を試してください:",
+                "    1. 開いた TikTok の画面で自分のアカウントにログインする",
+                "    2. ログイン状態を使い回すため .env に TIKTOK_SESSION_COOKIE を設定する",
+                "       (Chrome で tiktok.com を開き F12 → Application → Cookies →",
+                "        sessionid の値をコピー)",
+                "    3. しばらく時間を空けてから再実行する (短時間に何度も叩くと弾かれます)"]
+    if "blocked" in kinds:
+        out += ["  アクセスが拒否されています。時間を空けて再実行してください。"]
+    return out
+
+
 @register("tiktok_video")
 class TikTokVideoCollector(Collector):
     """tiktok.com を実ブラウザで開き、商品紹介動画を収集する."""
@@ -383,14 +452,44 @@ class TikTokVideoCollector(Collector):
         except (TypeError, ValueError):
             return 30.0
 
+    def build_targets(self) -> list[tuple[str, str]]:
+        """見に行くページの一覧を作る (見る順に並べる).
+
+        **ハッシュタグページを先に見る。**
+        TikTok の検索は未ログインだと弾かれることがあり
+        (「不明なエラーが発生しました」+ ログイン要求)、
+        検索だけに頼ると 0 件になる。
+        ハッシュタグページは同じ話題の動画が並ぶうえ、検索より通りやすい。
+
+        検索は後ろに置き、ハッシュタグで十分集まったら実行時に打ち切る。
+        """
+        seen: set[str] = set()
+        targets: list[tuple[str, str]] = []
+
+        def add(label: str, url: str) -> None:
+            if url not in seen:
+                seen.add(url)
+                targets.append((label, url))
+
+        # 明示指定のハッシュタグ → 検索語をタグとしても見る → 検索
+        for h in self.hashtags():
+            add(f"#{h}", f"https://www.tiktok.com/tag/{quote(h)}")
+        for q in self.queries():
+            tag = q.replace(" ", "").replace("　", "")
+            if tag:
+                add(f"#{tag}", f"https://www.tiktok.com/tag/{quote(tag)}")
+        for q in self.queries():
+            add(q, f"https://www.tiktok.com/search/video?q={quote(q)}")
+        return targets
+
+    #: これだけ集まったら残りのページは見に行かない (無駄な負荷をかけない)
+    def _enough(self) -> int:
+        return max(60, int(self.config.limit_per_type) * 4)
+
     def collect(self, region: str) -> list[Snapshot]:
         from playwright.sync_api import sync_playwright
 
-        targets: list[tuple[str, str]] = []
-        for q in self.queries():
-            targets.append((q, f"https://www.tiktok.com/search/video?q={quote(q)}"))
-        for h in self.hashtags():
-            targets.append((f"#{h}", f"https://www.tiktok.com/tag/{quote(h)}"))
+        targets = self.build_targets()
         if not targets:
             return []
 
@@ -402,29 +501,18 @@ class TikTokVideoCollector(Collector):
         page_hint = ""
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=self.config.headless,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-            )
-            ctx = browser.new_context(
-                locale="ja-JP", timezone_id="Asia/Tokyo",
-                viewport={"width": 1400, "height": 900},
-                user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                ),
-            )
+            ctx = open_browser(pw, self.config)
             if self.config.tiktok_session_cookie:
                 ctx.add_cookies([{
                     "name": "sessionid", "value": self.config.tiktok_session_cookie,
                     "domain": ".tiktok.com", "path": "/",
                 }])
-            page = ctx.new_page()
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
             current: dict[str, str] = {"q": ""}
 
             def on_response(resp: Any) -> None:
                 url = resp.url
-                if not any(m in url for m in ITEM_LIST_MARKERS):
+                if not is_item_list_url(url):
                     # 傍受対象外でも API らしきものは控える (原因調査用)
                     if "/api/" in url:
                         key = url.split("?")[0]
@@ -448,7 +536,12 @@ class TikTokVideoCollector(Collector):
 
             page.on("response", on_response)
 
+            enough = self._enough()
             for label, url in targets:
+                if len(captured) >= enough:
+                    log.info("十分に集まったので残りのページは見ません (%d 件)",
+                             len(captured))
+                    break
                 current["q"] = label
                 try:
                     log.info("動画を収集中: %s", label)
@@ -466,7 +559,6 @@ class TikTokVideoCollector(Collector):
                         pass
 
             ctx.close()
-            browser.close()
 
         min_intent = float(self.config.raw.get("min_product_intent", 0.35))
         max_age_h = self.max_age_days() * 24.0
@@ -533,6 +625,8 @@ class TikTokVideoCollector(Collector):
                 log.warning("  ★ headless (ブラウザ非表示) で実行しています。")
                 log.warning("     TikTok は非表示ブラウザからの検索結果を返さないことがあります。")
                 log.warning("     config.yaml の headless を false にしてください。")
+            for line in diagnose_block(page_hint):
+                log.warning("  %s", line)
             if page_hint:
                 log.warning("  画面の文言: %s", page_hint[:200])
             if other_api:

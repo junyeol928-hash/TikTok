@@ -30,3 +30,6 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# ブラウザのログイン状態 (端末ごと・巨大)
+data/browser-profile/

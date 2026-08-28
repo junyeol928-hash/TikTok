@@ -179,6 +179,60 @@ def test_product_intent_detail_returns_evidence():
     assert product_intent_detail("なんでもない", [], True) == (1.0, [])
 
 
+@pytest.mark.parametrize("url", [
+    # 実機で漏れていたもの。決め打ちの一覧だと静かに 0 件になっていた
+    "https://www.tiktok.com/api/prefetch/explore/item_list/?x=1",
+    "https://www.tiktok.com/api/search/item/full/?q=a",
+    "https://www.tiktok.com/api/search/general/full/?q=a",
+    "https://www.tiktok.com/api/challenge/item_list/?id=1",
+    "https://www.tiktok.com/api/post/item_list/?id=1",
+    "https://www.tiktok.com/api/recommend/item_list/",
+])
+def test_item_list_urls_are_intercepted(url):
+    from ttradar.collectors.tiktok_video import is_item_list_url
+    assert is_item_list_url(url)
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.tiktok.com/api/global-footer/graphql",
+    "https://www.tiktok.com/api/share/settings/",
+    "https://www.tiktok.com/api/v1/web-cookie-privacy/config",
+    "https://www.tiktok.com/node-webapp/api/importmap",
+])
+def test_unrelated_api_is_not_intercepted(url):
+    from ttradar.collectors.tiktok_video import is_item_list_url
+    assert not is_item_list_url(url)
+
+
+def test_hashtag_pages_come_before_search():
+    """検索は未ログインだと弾かれるので、タグページを先に見る."""
+    from ttradar.collectors.tiktok_video import TikTokVideoCollector
+    from ttradar.config import Config
+
+    cfg = Config()
+    cfg.raw["video_queries"] = ["購入品紹介", "便利グッズ"]
+    t = TikTokVideoCollector(cfg).build_targets()
+    urls = [u for _, u in t]
+    first_search = next(i for i, u in enumerate(urls) if "/search/" in u)
+    last_tag = max(i for i, u in enumerate(urls) if "/tag/" in u)
+    assert last_tag < first_search, "検索がタグページより先に来ている"
+    assert len(urls) == len(set(urls)), "同じ URL を二度見に行っている"
+
+
+@pytest.mark.parametrize("hint,expect_lines", [
+    ("購入品紹介 の動画 12件 おすすめ", False),
+    ("不明なエラーが発生しました もう一度お試しください ログイン", True),
+    ("認証を完了してください captcha", True),
+])
+def test_diagnose_block(hint, expect_lines):
+    """0 件のとき、次に何をすればいいかを出せること."""
+    from ttradar.collectors.tiktok_video import diagnose_block
+    lines = diagnose_block(hint)
+    assert bool(lines) is expect_lines
+    if lines:
+        assert any("ログイン" in x or "認証" in x for x in lines)
+
+
 def test_products_are_derived_without_shop_links():
     """商品リンクが無い動画からも商品が作られること.
 
