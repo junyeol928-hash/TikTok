@@ -160,10 +160,15 @@ class DemoCollector(Collector):
                     M.SAVE_RATE: saves / views,
                 }
                 vid = _vid_id(name, i)
+                # 実データでは商品リンクが付いていない紹介動画の方が多い。
+                # 全部リンク付きにするとフィルタの経路をテストできないので、
+                # 3 本に 1 本はリンク無し (キャプション判定のみ) にする。
+                linked = (pi + i) % 3 != 0
+                caption = CAPTIONS[(pi + i) % len(CAPTIONS)].format(p=name)
                 out.append(Snapshot(
                     entity_type=EntityType.VIDEO,
                     native_id=vid,
-                    name=CAPTIONS[(pi + i) % len(CAPTIONS)].format(p=name),
+                    name=caption,
                     source=self.name,
                     metrics=metrics,
                     region=region,
@@ -174,8 +179,10 @@ class DemoCollector(Collector):
                         "creator": handle, "creator_name": nick,
                         "creator_followers": followers,
                         "hashtags": tags,
-                        "product": {"name": name, "url": None, "anchor_type": 2},
-                        "product_intent": 1.0,
+                        "product": ({"name": name, "url": None, "anchor_type": 2}
+                                    if linked else None),
+                        "product_intent": 1.0 if linked else 0.65,
+                        "intent_words": ([] if linked else ["購入", "レビュー"]),
                         "query": "購入品紹介",
                         "create_time": captured - age_h * 3600,
                         "music": None,

@@ -257,6 +257,27 @@ class Database:
         sql += " ORDER BY last_seen DESC"
         return list(self._conn.execute(sql, args).fetchall())
 
+    # ------------------------------------------------------------------ meta
+    def set_meta(self, key: str, value: Any) -> None:
+        """任意の値を meta テーブルに JSON で保存する.
+
+        「今回の収集で何本を商品紹介動画として採用し、何本を落としたか」など、
+        スナップショットではないが UI に見せたい実行情報を置く場所。
+        """
+        with self.tx() as c:
+            c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                      (key, json.dumps(value, ensure_ascii=False)))
+
+    def get_meta(self, key: str, default: Any = None) -> Any:
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value"])
+        except (ValueError, TypeError):
+            return default
+
     def snapshot_count(self) -> int:
         return int(self._conn.execute("SELECT COUNT(*) c FROM snapshots").fetchone()["c"])
 

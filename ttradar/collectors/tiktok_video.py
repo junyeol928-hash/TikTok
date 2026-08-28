@@ -52,12 +52,22 @@ ITEM_LIST_MARKERS = (
     "/api/search/general/preview",
 )
 
-#: 商品紹介っぽさを判定するための語 (キャプション/ハッシュタグに対して)
+#: 商品紹介っぽさを判定するための語 (キャプション/ハッシュタグに対して)。
+#: 日本語は語境界が無いので部分一致で判定する。
 PRODUCT_INTENT_WORDS = (
     "購入", "買っ", "レビュー", "紹介", "おすすめ", "開封", "使ってみた",
     "コスパ", "神アイテム", "便利", "リピート", "比較", "本音", "正直",
-    "pr", "ad", "商品", "アイテム", "セール", "割引", "クーポン",
+    "商品", "アイテム", "セール", "割引", "クーポン",
 )
+
+#: 英字の目印は **語として** 一致させる。
+#: 部分一致にすると "pr" が "spring"、"ad" が "made"/"ready"/"ADHD" に
+#: 引っかかり、商品紹介ではない動画が丸ごと分析対象に混ざる。
+PRODUCT_INTENT_TOKENS = (
+    "pr", "ad", "review", "haul", "unboxing", "gifted", "tiktokmademebuyit",
+)
+_TOKEN_RE = re.compile(
+    r"(?<![a-z0-9])(" + "|".join(PRODUCT_INTENT_TOKENS) + r")(?![a-z0-9])")
 
 #: TikTok Shop リンクを含むアンカー種別
 SHOP_ANCHOR_TYPES = {2, 46, 47}
@@ -152,6 +162,25 @@ def extract_product_anchor(item: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def product_intent_detail(desc: str, hashtags: list[str],
+                          has_anchor: bool) -> tuple[float, list[str]]:
+    """商品紹介動画らしさ (0-1) と、そう判定した **根拠の語** を返す.
+
+    根拠を一緒に返すのは UI で見せるため。
+    「なぜこの動画が商品紹介だと判定されたか」が画面に出ないと、
+    ただ伸びている動画を混ぜていないことを利用者が確かめられない。
+    """
+    hay = (desc + " " + " ".join(hashtags)).lower()
+    hits = [w for w in PRODUCT_INTENT_WORDS if w in hay]
+    hits += sorted(set(_TOKEN_RE.findall(hay)))
+    if has_anchor:
+        # 商品リンクが付いている = その商品の紹介動画であることが確定
+        return 1.0, hits
+    if not hits:
+        return 0.0, []
+    return min(1.0, 0.35 + 0.15 * len(hits)), hits
+
+
 def product_intent_score(desc: str, hashtags: list[str],
                          has_anchor: bool) -> float:
     """この動画がどれだけ「商品紹介動画」らしいか (0-1).
@@ -159,13 +188,7 @@ def product_intent_score(desc: str, hashtags: list[str],
     商品リンク付きは確定 (1.0)。それ以外はキャプションとタグの語で推定する。
     無関係な動画をトレンド集計に混ぜないためのフィルタ。
     """
-    if has_anchor:
-        return 1.0
-    hay = (desc + " " + " ".join(hashtags)).lower()
-    hits = sum(1 for w in PRODUCT_INTENT_WORDS if w in hay)
-    if hits == 0:
-        return 0.0
-    return min(1.0, 0.35 + 0.15 * hits)
+    return product_intent_detail(desc, hashtags, has_anchor)[0]
 
 
 def parse_item(item: dict[str, Any], region: str, source: str,
@@ -231,7 +254,7 @@ def parse_item(item: dict[str, Any], region: str, source: str,
     desc = str(item.get("desc") or item.get("description") or "")
     hashtags = extract_hashtags(item)
     anchor = extract_product_anchor(item)
-    intent = product_intent_score(desc, hashtags, anchor is not None)
+    intent, intent_words = product_intent_detail(desc, hashtags, anchor is not None)
 
     cover = (video.get("cover") or video.get("originCover")
              or video.get("dynamicCover") or item.get("cover"))
@@ -254,6 +277,8 @@ def parse_item(item: dict[str, Any], region: str, source: str,
             "hashtags": hashtags,
             "product": anchor,
             "product_intent": round(intent, 2),
+            # 判定の根拠。UI に出して「なぜ商品紹介動画と見なしたか」を示す
+            "intent_words": intent_words[:6],
             "query": query,
             "create_time": create_time,
             "music": ((item.get("music") or {}).get("title")
@@ -268,6 +293,11 @@ class TikTokVideoCollector(Collector):
 
     provides = (EntityType.VIDEO,)
     requires = "playwright + chromium (pip install playwright && playwright install chromium)"
+
+    #: 直近の collect() で「何本見て何本を商品紹介動画として採用したか」。
+    #: Radar がこれを DB に保存し、アプリの「分析対象」パネルに出す。
+    #: クラス属性は既定値。collect() が毎回新しい dict を代入する (共有しない)。
+    stats: dict[str, Any] = {}
 
     #: ページを開いてから XHR を待つ時間 (ミリ秒)
     #: TikTok の検索結果は描画後に遅れて item 一覧を取りに行くため、
@@ -379,6 +409,7 @@ class TikTokVideoCollector(Collector):
 
         min_intent = float(self.config.raw.get("min_product_intent", 0.35))
         skipped = 0
+        with_link = 0
         for raw in captured:
             try:
                 snap = parse_item(raw, region, self.name, raw.get("__query"))
@@ -389,11 +420,28 @@ class TikTokVideoCollector(Collector):
             if float(snap.extra.get("product_intent") or 0) < min_intent:
                 skipped += 1
                 continue
+            if snap.extra.get("product"):
+                with_link += 1
             snap.captured_at = captured_at
             out.append(snap)
 
         log.info("動画 %d 件を採用 (商品紹介らしさ %.2f 未満の %d 件を除外)",
                  len(out), min_intent, skipped)
+        if out:
+            log.info("  うち %d 件は TikTok Shop の商品リンク付き "
+                     "(どの商品の紹介動画かが確定する)", with_link)
+
+        # 「何を見て、何を落としたか」を UI に出せるように残す。
+        # 商品紹介動画だけを見ていることを利用者が確認できないと、
+        # ただ伸びている動画を混ぜていないか判断できない。
+        self.stats = {
+            "queries": [label for label, _ in targets],
+            "min_product_intent": min_intent,
+            "seen": len(captured),
+            "kept": len(out),
+            "skipped_not_product": skipped,
+            "with_shop_link": with_link,
+        }
 
         if not captured:
             # ここが 0 だと、フィルタ以前に一覧そのものを受け取れていない。

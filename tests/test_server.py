@@ -166,7 +166,10 @@ def test_videos_endpoint(seeded):
     assert views == sorted(views, reverse=True)
     for r in v["rows"][:5]:
         assert r["extra"].get("creator")
-        assert r["extra"].get("product", {}).get("name")
+        # 商品紹介動画であることの根拠は必ず持つ:
+        # 商品リンクそのものか、判定に使った語のどちらか。
+        ex = r["extra"]
+        assert (ex.get("product") or {}).get("name") or ex.get("intent_words")
 
     # 並び替えが効くこと
     by_vel = api.videos(72, "JP", "velocity", None, 10)["rows"]
@@ -177,6 +180,47 @@ def test_videos_endpoint(seeded):
     who = v["rows"][0]["extra"]["creator"]
     hit = api.videos(72, "JP", "views", who, 50)["rows"]
     assert hit and all(who in str(r["extra"].get("creator", "")) for r in hit)
+
+
+def test_videos_kind_filter(seeded):
+    """商品紹介動画への絞り込みが効き、内訳の件数が返ること.
+
+    「TikTok に上がっている動画なら何でもいい」わけではないので、
+    UI が「何本のうち何本がリンク確定か」を出せる必要がある。
+    """
+    api = Api(seeded)
+    all_ = api.videos(72, "JP", "views", None, 500, "all")
+    shop = api.videos(72, "JP", "views", None, 500, "shop")
+    strong = api.videos(72, "JP", "views", None, 500, "strong")
+
+    c = all_["counts"]
+    assert c["shop"] > 0, "リンク確定の紹介動画が 1 本も無い"
+    assert c["shop"] < c["all"], "デモデータはリンク無しも含むはず"
+    assert c["shop"] <= c["strong"] <= c["all"]
+
+    # 件数は絞り込みに関係なく同じ内訳を返す (UI のチップが揺れない)
+    assert shop["counts"] == c and strong["counts"] == c
+    assert shop["count"] == c["shop"]
+    assert all(r["extra"].get("product") for r in shop["rows"])
+    assert all(float(r["extra"].get("product_intent") or 0) >= 0.65
+               for r in strong["rows"])
+
+
+def test_summary_reports_product_focus(seeded):
+    """『商品紹介動画だけを見ている』ことを画面に出すための集計."""
+    f = Api(seeded).summary(72, "JP")["focus"]
+    assert f["videos"] > 0
+    assert 0 < f["with_shop_link"] <= f["videos"]
+    assert f["products"] > 0
+    assert f["queries"], "何を検索しているかを UI に出せない"
+    assert 0 < f["min_product_intent"] <= 1
+
+
+def test_meta_exposes_filter_settings(cfg):
+    m = Api(cfg).meta()
+    assert m["video_queries"], "検索語が UI から見えない"
+    assert 0 < m["min_product_intent"] <= 1
+    assert m["strong_intent"] > m["min_product_intent"]
 
 
 def test_product_rows_carry_evidence(seeded):

@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .analysis.digest import Radar
+from .collectors.tiktok_video import DEFAULT_QUERIES
 from .config import Config
 from .db import Database
 from .models import PRIMARY_METRIC, EntityType, M, TrendStage
@@ -103,6 +104,12 @@ def _run_collect(cfg: Config) -> None:
             _job.update(running=False, finished=time.time(), error=str(e))
 
 
+#: 商品リンクは無いが「商品紹介動画としてかなり確か」とみなす下限。
+#: 収集時のしきい値 (min_product_intent, 既定 0.35) より厳しくして、
+#: 「レビュー」等の語が 1 つ引っかかっただけの動画と区別する。
+STRONG_INTENT = 0.65
+
+
 class Api:
     """DB を読んで JSON を返す層. HTTP から切り離してテストしやすくする."""
 
@@ -118,8 +125,30 @@ class Api:
             for s in sigs:
                 counts[s.stage.value] += 1
             times = db.distinct_capture_times(2)
+
+            # 「商品紹介動画だけを分析している」ことを画面で確認できるようにする。
+            # ここが無いと、ただ伸びている動画を混ぜていないか利用者に分からない。
+            vids = digest.by_type.get(EntityType.VIDEO, [])
+            shop = strong = 0
+            for sig in vids:
+                ex = self._latest_extra(db, sig.entity_key)
+                if ex.get("product"):
+                    shop += 1
+                if float(ex.get("product_intent") or 0) >= STRONG_INTENT:
+                    strong += 1
+            focus = {
+                "videos": len(vids),
+                "with_shop_link": shop,
+                "strong_intent": strong,
+                "products": len(digest.by_type.get(EntityType.PRODUCT, [])),
+                "queries": self._video_queries(),
+                "min_product_intent": self._min_intent(),
+                "last_run": db.get_meta("last_filter_stats"),
+            }
+
             return {
                 "region": digest.region,
+                "focus": focus,
                 "generated_at": digest.generated_at,
                 "total_entities": digest.total_entities,
                 "insufficient_history": digest.insufficient_history,
@@ -178,12 +207,24 @@ class Api:
         return [vals[min(int(i * step), len(vals) - 1)] for i in range(points)]
 
     def videos(self, window: float | None, region: str | None,
-               sort: str, query: str | None, limit: int) -> dict[str, Any]:
+               sort: str, query: str | None, limit: int,
+               kind: str = "all") -> dict[str, Any]:
         """伸びている商品紹介動画そのものを返す.
 
         商品を決める前に「どんな動画が伸びているか」を見たい場面のためのビュー。
         並び順を変えられるのが要点: 再生数が多い動画と、
         投稿から日が浅いのに伸びている動画 (時速) では意味が違う。
+
+        ``kind`` で「どこまで商品紹介動画に絞るか」を選べる:
+
+        ``shop``
+            TikTok Shop の商品リンクが付いている動画だけ。
+            どの商品の紹介動画かが確定しているので最も確実。
+        ``strong``
+            商品リンクは無いが、キャプションとタグから
+            商品紹介らしさが高い (>= 0.65) と判定された動画も含む。
+        ``all``
+            収集時のしきい値 (min_product_intent) を通った動画すべて。
         """
         with Database(self.cfg.db_path) as db:
             digest = Radar(self.cfg, db).analyze(region=region, window_hours=window)
@@ -193,6 +234,21 @@ class Api:
                 d = sig.to_dict()
                 d["extra"] = self._latest_extra(db, sig.entity_key)
                 rows.append(d)
+
+            # 絞り込み前に内訳を数えておく。UI のチップに件数を出すため。
+            counts = {
+                "all": len(rows),
+                "shop": sum(1 for r in rows if (r["extra"] or {}).get("product")),
+                "strong": sum(1 for r in rows
+                              if float((r["extra"] or {}).get("product_intent") or 0)
+                              >= STRONG_INTENT),
+            }
+            if kind == "shop":
+                rows = [r for r in rows if (r["extra"] or {}).get("product")]
+            elif kind == "strong":
+                rows = [r for r in rows
+                        if float((r["extra"] or {}).get("product_intent") or 0)
+                        >= STRONG_INTENT]
 
             if query:
                 q = query.lower()
@@ -213,7 +269,8 @@ class Api:
                 "score": lambda r: r["score"],
             }.get(sort or "views", lambda r: r["metrics"].get(M.VIEWS, 0))
             rows.sort(key=keyed, reverse=True)
-            return {"count": len(rows), "rows": rows[:limit]}
+            return {"count": len(rows), "counts": counts, "kind": kind,
+                    "rows": rows[:limit]}
 
     def history(self, key: str) -> dict[str, Any]:
         """詳細チャート用の完全な時系列."""
@@ -248,11 +305,26 @@ class Api:
             db.remove_watch(kind, value)
         return {"ok": True}
 
+    def _video_queries(self) -> list[str]:
+        """商品紹介動画を探しに行っている検索語 (UI に出して中身を示す)."""
+        raw = self.cfg.raw.get("video_queries")
+        qs = [str(q) for q in raw] if isinstance(raw, list) and raw else list(DEFAULT_QUERIES)
+        tags = self.cfg.raw.get("video_hashtags")
+        if isinstance(tags, list):
+            qs += [f"#{str(t).lstrip('#')}" for t in tags]
+        return qs
+
+    def _min_intent(self) -> float:
+        return float(self.cfg.raw.get("min_product_intent", 0.35))
+
     def meta(self) -> dict[str, Any]:
         """UI の初期化に必要な静的情報."""
         return {
             "regions": self.cfg.regions,
             "sources": self.cfg.sources,
+            "video_queries": self._video_queries(),
+            "min_product_intent": self._min_intent(),
+            "strong_intent": STRONG_INTENT,
             "alert_threshold": self.cfg.alert_threshold,
             "default_window": self.cfg.growth_window_hours,
             "my_niches": self.cfg.my_niches,
@@ -338,7 +410,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/videos":
                 return self._json(self.api.videos(
                     fnum("window"), one("region"), one("sort", "views"),
-                    one("q"), int(one("limit", 60) or 60)))
+                    one("q"), int(one("limit", 60) or 60),
+                    one("kind", "all")))
             if u.path == "/api/history":
                 key = one("key")
                 if not key:

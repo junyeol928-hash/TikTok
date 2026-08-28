@@ -34,6 +34,8 @@ class RunResult:
     errors: list[str] = field(default_factory=list)
     by_source: dict[str, int] = field(default_factory=dict)
     duration: float = 0.0
+    #: collector 別の「何本見て何本を商品紹介動画として採用したか」
+    filter_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -119,6 +121,11 @@ class Radar:
                 if snaps:
                     all_snaps.extend(snaps)
                     result.by_source[col.name] = result.by_source.get(col.name, 0) + len(snaps)
+            # collector が「何を見て何を採用したか」を残していれば引き取る。
+            # アプリ側で「商品紹介動画だけを分析している」ことを示すのに使う。
+            stats = getattr(col, "stats", None)
+            if isinstance(stats, dict) and stats:
+                result.filter_stats[col.name] = dict(stats)
             try:
                 col.close()
             except Exception:
@@ -135,11 +142,21 @@ class Radar:
                     all_snaps.extend(derived)
                     result.by_source["rollup"] = (
                         result.by_source.get("rollup", 0) + len(derived))
+            result.filter_stats["rollup"] = {
+                "videos": len(videos),
+                "with_shop_link": sum(1 for v in videos if (v.extra or {}).get("product")),
+                "products": sum(1 for s in all_snaps
+                                if s.entity_type == EntityType.PRODUCT
+                                and str(s.source).startswith("rollup")),
+            }
 
         result.collected = len(all_snaps)
         if all_snaps:
             result.inserted = self.db.upsert_snapshots(all_snaps)
         result.duration = time.time() - t0
+        if result.filter_stats:
+            self.db.set_meta("last_filter_stats",
+                             {"at": time.time(), "by_source": result.filter_stats})
         self.db.finish_run(run_id, result.ok, result.inserted, result.errors)
         return result
 

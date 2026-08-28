@@ -14,6 +14,7 @@ from ttradar.analysis.scoring import competition_fit
 from ttradar.collectors.tiktok_video import (extract_hashtags,
                                              extract_product_anchor,
                                              find_video_items, parse_item,
+                                             product_intent_detail,
                                              product_intent_score)
 from ttradar.models import EntityType, M, Snapshot
 
@@ -109,6 +110,46 @@ def test_extract_product_anchor():
 def test_product_intent_score(desc, tags, anchor, lo, hi):
     v = product_intent_score(desc, tags, anchor)
     assert lo <= v <= hi
+
+
+@pytest.mark.parametrize("desc,tags", [
+    ("I made this at home", ["fyp"]),        # "ad" が made に一致してはいけない
+    ("Spring vibes 2026", ["fyp"]),          # "pr" が spring に一致してはいけない
+    ("my dad is so ready", []),
+    ("ADHD あるある", []),
+    ("grandma reaction", ["cat"]),
+])
+def test_ascii_markers_do_not_match_inside_words(desc, tags):
+    """英字の目印は語として一致させる.
+
+    部分一致だと商品紹介ではない動画が丸ごと分析対象に混ざる。
+    「商品紹介動画だけを見る」という前提そのものが崩れるので回帰テストを置く。
+    """
+    assert product_intent_score(desc, tags, False) == 0.0
+
+
+@pytest.mark.parametrize("desc,tags", [
+    ("honest review of this", ["ad"]),
+    ("summer haul unboxing", ["haul"]),
+    ("提供です #PR", ["pr"]),
+])
+def test_ascii_markers_match_as_words(desc, tags):
+    assert product_intent_score(desc, tags, False) > 0.0
+
+
+def test_product_intent_detail_returns_evidence():
+    """判定の根拠を返す. UI で「なぜ商品紹介と見なしたか」を出すのに使う."""
+    score, words = product_intent_detail("【購入品紹介】買ってよかった", ["レビュー"], False)
+    assert score > 0.5
+    assert "購入" in words and "レビュー" in words
+    # 商品リンク付きは確定だが、語の根拠も一緒に返す
+    assert product_intent_detail("なんでもない", [], True) == (1.0, [])
+
+
+def test_parse_item_records_intent_evidence():
+    snap = parse_item(item(), "JP", "tiktok_video")
+    assert snap.extra["product"]["name"] == "充電式 毛玉取り器"
+    assert isinstance(snap.extra["intent_words"], list)
 
 
 # ---------------------------------------------------------------- 商品名の正規化

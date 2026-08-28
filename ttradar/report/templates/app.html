@@ -120,7 +120,7 @@ a{color:inherit;text-decoration:none}
 select.btn{appearance:none;padding-right:10px}
 .field{
   height:32px;padding:0 11px;background:var(--panel);border:1px solid var(--line-2);
-  border-radius:9px;font-size:12.5px;min-width:170px;
+  border-radius:9px;font-size:12.5px;min-width:170px;max-width:100%;
 }
 
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
@@ -252,6 +252,49 @@ select.btn{appearance:none;padding-right:10px}
 .vfoot .who{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 .vbadge{position:absolute;left:6px;top:6px;background:var(--accent);color:var(--accent-ink);
   font-size:9.5px;font-weight:900;padding:2px 6px;border-radius:5px;letter-spacing:.02em}
+
+/* 商品紹介動画であることの根拠。「ただ伸びている動画」と混ざっていない
+   ことを 1 枚ずつ確認できるように、カードの中で最初に出す。 */
+.pbadge{display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;
+  color:var(--accent);background:var(--accent-wash);border-radius:6px;
+  padding:3px 7px;margin-bottom:6px;min-width:0}
+.pbadge .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ibadge{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--ink-3);
+  margin-bottom:6px;min-width:0}
+.ibadge .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 絞り込みのセグメント。件数を必ず添えて、何を外したかが分かるようにする */
+.segs{display:inline-flex;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:9px;padding:2px;gap:2px}
+.seg{border:0;background:transparent;color:var(--ink-2);font:inherit;font-size:12px;
+  font-weight:600;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.seg:hover{color:var(--ink)}
+.seg[aria-pressed="true"]{background:var(--panel);color:var(--ink);
+  box-shadow:0 1px 2px rgba(0,0,0,.10)}
+.seg .c{color:var(--ink-3);font-weight:500;margin-left:5px;
+  font-variant-numeric:tabular-nums}
+
+/* 「何を集めて、何を落としたか」の絞り込み経路 */
+.focus{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:15px 17px;margin-bottom:18px;box-shadow:var(--shadow)}
+.focus-h{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;
+  margin-bottom:12px;flex-wrap:wrap}
+.focus-h .sub{font-weight:400;color:var(--ink-3);font-size:11.5px}
+/* 区切り線ではなくタイルにする。折り返しても線が宙に浮かないので
+   画面幅に関係なく同じ見え方になる。 */
+.funnel{display:grid;gap:8px;
+  grid-template-columns:repeat(auto-fit,minmax(126px,1fr))}
+.fstep{display:flex;flex-direction:column;gap:2px;padding:10px 12px;
+  background:var(--panel-2);border-radius:10px;min-width:0}
+.fstep .k{font-size:10px;color:var(--ink-3);font-weight:700;letter-spacing:.02em}
+.fstep .v{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;
+  letter-spacing:-.01em;line-height:1.15}
+.fstep .s{font-size:10.5px;color:var(--ink-3);line-height:1.35}
+.fstep.drop .v{color:var(--ink-3)}
+.fstep.keep{background:var(--accent-wash)}
+.fstep.keep .v{color:var(--accent)}
+.focus-q{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:13px;
+  padding-top:12px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-3)}
 
 /* ---------------------------------------------------------------- 一覧・表 */
 .simple{display:flex;flex-direction:column}
@@ -402,6 +445,7 @@ th.r,td.r{text-align:right}
 
 const S = {
   view:"today", window:72, sort:"views", q:"",
+  kind:"all", videoCounts:null,       // 商品紹介動画の絞り込み状態と内訳
   meta:null, summary:null, products:[], videos:[], tags:[], creators:[],
   jobTimer:null, lastJob:0, tableMode:false,
 };
@@ -537,8 +581,8 @@ function spark(vals,w,h){
 
 const VIEWS = {
   today:    {title:"今日の一手",   sub:"実際に伸びている紹介動画から、今撮るべき商品を決める"},
-  products: {title:"商品",         sub:"紹介動画の成績から算出。クリックで根拠を表示"},
-  videos:   {title:"動画",         sub:"いま伸びている商品紹介動画そのもの"},
+  products: {title:"商品",         sub:"商品リンク付きの紹介動画だけから抽出。クリックで根拠を表示"},
+  videos:   {title:"商品紹介動画", sub:"商品紹介と判定した動画だけ。絞り込みで確認できます"},
   hashtags: {title:"ハッシュタグ", sub:"伸びている紹介動画が実際に使っているタグ"},
   creators: {title:"クリエイター", sub:"同じジャンルで結果を出している投稿者"},
   map:      {title:"機会マップ",   sub:"競合の少なさ × 勢い。左上が狙い目"},
@@ -564,7 +608,10 @@ function render(){
       伸び率は前回との差分で出すため、今は「現在の順位」しか分かりません。
       <code>--interval</code> を付けて起動するか「収集する」を数回押すと、
       伸び率・加速度・ステージ判定が有効になります。</div></div>` : "";
-  p.innerHTML = banner + ({
+  // 商品紹介動画に絞っていることは全ての数字の前提なので、
+  // 商品と動画を見ている間は常に画面に出しておく。
+  const focus = (S.view==="today"||S.view==="videos") ? focusPanel() : "";
+  p.innerHTML = banner + focus + ({
     today:viewToday, products:viewProducts, videos:viewVideos,
     hashtags:viewTags, creators:viewCreators, map:viewMap,
   }[S.view])();
@@ -583,8 +630,11 @@ function emptyState(){
 /* ---------------------------------------------------------------- 今日の一手 */
 function viewToday(){
   const top=S.products[0];
-  if(!top) return `<div class="empty"><h3>商品がまだ抽出できていません</h3>
-    <p>商品リンク付きの紹介動画が集まると、ここに「今撮るべき商品」が出ます。</p></div>`;
+  if(!top) return focusPanel()+`<div class="empty"><h3>商品がまだ抽出できていません</h3>
+    <p>商品は <b>TikTok Shop の商品リンクが付いた紹介動画</b> からだけ作ります。
+    リンク無しの紹介動画は「商品紹介動画」タブとハッシュタグの集計に使われます。</p>
+    <p>収集を重ねるか、config.yaml の <code>video_queries</code> に
+    ご自身のジャンルの語を足してみてください。</p></div>`;
   const m=top.metrics||{}, e=top.extra||{};
   const vids=(e.top_videos||[]).slice(0,3);
   const tags=(e.hashtags||[]).slice(0,7);
@@ -594,6 +644,7 @@ function viewToday(){
       <div class="hero-eyebrow"><span class="pulse"></span>今いちばん撮る価値がある商品
         ${stageBadge(top)}
         <span class="chip" style="font-weight:700">スコア ${Math.round(top.score)}</span>
+        <span class="chip" title="TikTok Shop の商品リンク付き紹介動画から抽出しています">🛒 リンク確定</span>
       </div>
       <h2>${esc(top.name)}</h2>
       <div class="why">${esc((top.reasons||[]).slice(0,3).join(" ／ "))}</div>
@@ -635,8 +686,10 @@ function viewToday(){
   </div>`;
 
   const hot=S.videos.slice(0,6);
+  const sortLabel=(SORTS.find(x=>x[0]===S.sort)||["","再生数"])[1];
   const feed=`<div class="sect">
-    <div class="sect-h"><h2>いま伸びている動画</h2><p>時速（再生数÷経過時間）が高い順</p></div>
+    <div class="sect-h"><h2>いま伸びている商品紹介動画</h2>
+      <p>${esc(sortLabel)}が多い順。🛒 は商品リンク付き、🔎 は判定に使った語</p></div>
     <div class="vgrid">${hot.map(videoCard).join("")}</div>
   </div>`;
   return hero+next+feed;
@@ -669,7 +722,8 @@ function productRow(r,rank){
 }
 function viewProducts(){
   if(!S.products.length)return `<div class="empty"><h3>商品がまだありません</h3>
-    <p>商品リンク付きの紹介動画が集まると抽出されます。</p></div>`;
+    <p>商品は <b>TikTok Shop の商品リンクが付いた紹介動画</b> からだけ抽出します。
+    今回の収集ではリンク付きの動画が見つかりませんでした。</p></div>`;
   const toggle=`<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
     <input class="field" id="q" type="search" placeholder="商品名で絞り込み"
       value="${esc(S.q)}" aria-label="検索">
@@ -699,12 +753,27 @@ function productTable(rows){
 }
 
 /* ---------------------------------------------------------------- 動画 */
+/* この動画が「商品紹介動画」である根拠を 1 行で示す。
+   商品リンクがあれば商品名そのもの、無ければ判定に使った語を出す。
+   ここが空の動画は分析対象に入っていない。 */
+function proofLine(e){
+  const prod=e.product;
+  if(prod&&prod.name)
+    return `<div class="pbadge" title="TikTok Shop の商品リンク付き — ${esc(prod.name)}">
+      <span>🛒</span><span class="nm">${esc(prod.name)}</span></div>`;
+  const w=(e.intent_words||[]).slice(0,3);
+  if(w.length)
+    return `<div class="ibadge" title="商品紹介動画と判定した根拠の語">
+      <span>🔎</span><span class="nm">${esc(w.join("・"))}</span></div>`;
+  return "";
+}
 function videoCard(r){
   const m=r.metrics||{}, e=r.extra||{};
   const badge=(m.age_hours!==undefined&&m.age_hours<48)?"NEW":null;
   return `<div class="vcard" data-key="${esc(r.entity_key)}" tabindex="0" role="button">
     ${thumb("md",r.name,r.thumbnail,m.duration,badge)}
     <div class="vbody">
+      ${proofLine(e)}
       <div class="vtitle">${esc(r.name)}</div>
       <div class="vstats">
         <span><b>${n(m.views)}</b> 再生</span>
@@ -718,17 +787,68 @@ function videoCard(r){
 }
 const SORTS=[["views","再生数"],["velocity","時速（伸びの速さ）"],["save_rate","保存率"],
   ["engagement","エンゲージ率"],["likes","いいね"],["recent","新着順"]];
-function viewVideos(){
-  const ctl=`<div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
-    <select class="btn" id="sortSel" aria-label="並び順">
-      ${SORTS.map(([v,l])=>`<option value="${v}"${S.sort===v?" selected":""}>${l}</option>`).join("")}
-    </select>
-    <input class="field" id="q" type="search" placeholder="キャプション・投稿者・タグで検索"
-      value="${esc(S.q)}" aria-label="検索">
-    <span style="font-size:11.5px;color:var(--ink-3)">${S.videos.length} 本</span>
+/* 「どこまで商品紹介動画に絞るか」。
+   TikTok に上がっている動画を無差別に並べているわけではないことを、
+   利用者が自分で切り替えて確かめられるようにする。 */
+const KINDS=[
+  ["shop","🛒 商品リンクあり","どの商品の紹介動画かが確定しているもの"],
+  ["strong","紹介度が高い","キャプションとタグから商品紹介と強く判定されたもの"],
+  ["all","絞り込みなし","収集時のしきい値を通った紹介動画すべて"],
+];
+function kindSegs(){
+  const c=S.videoCounts||{};
+  return `<div class="segs" role="group" aria-label="商品紹介動画の絞り込み">
+    ${KINDS.map(([v,l,t])=>`<button class="seg" data-kind="${v}" title="${esc(t)}"
+      aria-pressed="${S.kind===v}">${l}<span class="c">${c[v]!==undefined?c[v]:"—"}</span></button>`).join("")}
   </div>`;
-  if(!S.videos.length)return ctl+`<div class="empty"><h3>動画がありません</h3></div>`;
+}
+function viewVideos(){
+  const ctl=`<div style="display:flex;gap:10px;margin-bottom:10px;align-items:center;
+      flex-wrap:wrap;justify-content:space-between">
+    ${kindSegs()}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select class="btn" id="sortSel" aria-label="並び順">
+        ${SORTS.map(([v,l])=>`<option value="${v}"${S.sort===v?" selected":""}>${l}</option>`).join("")}
+      </select>
+      <input class="field" id="q" type="search" placeholder="キャプション・投稿者"
+        value="${esc(S.q)}" aria-label="検索">
+    </div>
+  </div>
+  <div style="font-size:11.5px;color:var(--ink-3);margin-bottom:14px">
+    ${esc(KINDS.find(k=>k[0]===S.kind)?.[2]||"")} ・ ${S.videos.length} 本を表示中
+  </div>`;
+  if(!S.videos.length)return ctl+`<div class="empty">
+    <h3>この条件に当てはまる紹介動画がありません</h3>
+    <p>絞り込みを緩めるか、収集を重ねてください。</p></div>`;
   return ctl+`<div class="vgrid">${S.videos.map(videoCard).join("")}</div>`;
+}
+
+/* ------------------------------------------------- 分析対象パネル（絞り込み経路）
+   「TikTok に上がっている動画なら何でもいい」わけではないので、
+   何を検索し、何本を商品紹介動画として残し、何本を落としたかを常に出す。 */
+function focusPanel(){
+  const f=(S.summary||{}).focus; if(!f)return "";
+  const run=(f.last_run||{}).by_source||{};
+  const col=run.tiktok_video||{};
+  const seen=col.seen, dropped=col.skipped_not_product;
+  const qs=(f.queries||[]).slice(0,12);
+  const step=(k,v,sub,cls)=>`<div class="fstep ${cls||""}">
+    <div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
+  return `<div class="focus">
+    <div class="focus-h"><span>🎯</span><span>分析対象は商品紹介動画だけ</span>
+      <span class="sub">— 伸びている動画を無差別に集めてはいません</span></div>
+    <div class="funnel">
+      ${seen!==undefined?step("検索でヒット",n(seen),"TikTok が返した動画"):""}
+      ${dropped!==undefined?step("商品紹介ではないと判定",n(dropped),
+        `紹介度 ${f.min_product_intent} 未満は除外`,"drop"):""}
+      ${step("分析対象の紹介動画",n(f.videos),"ここから先が全ての集計","keep")}
+      ${step("うち商品リンク付き",n(f.with_shop_link),"どの商品かが確定")}
+      ${step("導出できた商品",n(f.products),"撮る候補")}
+    </div>
+    ${qs.length?`<div class="focus-q"><span>検索した語</span>
+      ${qs.map(q=>`<span class="chip">${esc(q)}</span>`).join("")}
+      <span>（config.yaml の <code>video_queries</code> で変更できます）</span></div>`:""}
+  </div>`;
 }
 
 /* ---------------------------------------------------------------- タグ / 人 */
@@ -1041,12 +1161,22 @@ function wire(){
     loadVideos().then(render);});
   const tb=$("tableBtn");
   if(tb)tb.addEventListener("click",()=>{S.tableMode=!S.tableMode; render();});
+  document.querySelectorAll(".seg[data-kind]").forEach(b=>
+    b.addEventListener("click",()=>{ if(S.kind===b.dataset.kind)return;
+      S.kind=b.dataset.kind;
+      loadVideos().then(()=>{
+        const c=S.videoCounts||{};
+        $("nVideos").textContent=(c[S.kind]!==undefined?c[S.kind]:S.videos.length)||"";
+        render();
+      }); }));
 }
 
 /* ---------------------------------------------------------------- 読み込み */
 async function loadVideos(){
-  const qs=new URLSearchParams({window:S.window,sort:S.sort,q:S.q,limit:60});
-  try{ S.videos=(await api("/api/videos?"+qs)).rows; }
+  const qs=new URLSearchParams({window:S.window,sort:S.sort,q:S.q,
+                                kind:S.kind,limit:60});
+  try{ const r=await api("/api/videos?"+qs);
+       S.videos=r.rows; S.videoCounts=r.counts||null; }
   catch(e){ S.videos=[]; }
   return S.videos;
 }
@@ -1064,7 +1194,9 @@ async function loadAll(){
     S.sort = S.sort||"views";
     await loadVideos();
     $("nProducts").textContent=S.products.length||"";
-    $("nVideos").textContent=S.videos.length||"";
+    $("nVideos").textContent=
+      (S.videoCounts&&S.videoCounts[S.kind]!==undefined
+        ? S.videoCounts[S.kind] : S.videos.length)||"";
     $("nTags").textContent=S.tags.length||"";
     $("nCreators").textContent=S.creators.length||"";
     const iv=S.job&&S.job.interval_min;
