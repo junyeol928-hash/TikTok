@@ -223,6 +223,37 @@ def test_meta_exposes_filter_settings(cfg):
     assert m["strong_intent"] > m["min_product_intent"]
 
 
+def test_formats_endpoint(seeded):
+    """『どういう型の紹介動画が伸びているか』の集計.
+
+    個々の動画ではなく、切り口と尺という型で比べられること。
+    合計ではなく中央値であること (1本のバズに引っ張られない)。
+    """
+    f = Api(seeded).formats(72, "JP")
+    assert f["total"] > 0
+    assert f["queries"], "切り口の集計が空"
+    # 中央値の降順に並んでいる (UI がそのまま描ける)
+    meds = [q["median_views"] for q in f["queries"]]
+    assert meds == sorted(meds, reverse=True)
+    for q in f["queries"]:
+        assert q["videos"] > 0
+        assert q["with_shop_link"] <= q["videos"]
+        # 中央値は合計ではない: 本数を掛けた値より必ず小さいはず
+        assert q["median_views"] <= sum(
+            r["metrics"].get("views", 0)
+            for r in Api(seeded).videos(72, "JP", "views", None, 999)["rows"])
+
+    # 尺は決まった順序で返す (グラフの並びが毎回変わらない)
+    labels = [d["name"] for d in f["durations"]]
+    order = ["〜15秒", "15〜30秒", "30〜60秒", "60秒〜"]
+    assert labels == [x for x in order if x in labels]
+
+
+def test_formats_on_empty_db(cfg):
+    f = Api(cfg).formats(None, None)
+    assert f == {"total": 0, "queries": [], "durations": []}
+
+
 def test_product_rows_carry_evidence(seeded):
     """商品行が『根拠になった動画』とタグを持つこと (UI の主役)."""
     rows = Api(seeded).signals(72, "JP", "product", None, None, 5)["rows"]

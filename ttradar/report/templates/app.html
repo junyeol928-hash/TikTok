@@ -274,6 +274,22 @@ select.btn{appearance:none;padding-right:10px}
 .seg .c{color:var(--ink-3);font-weight:500;margin-left:5px;
   font-variant-numeric:tabular-nums}
 
+/* 「どういう型の紹介動画が伸びているか」。中央値を横棒で比べる。
+   色は 1 系統のみ。1 位だけ濃くして、あとは減色する (強調表現)。 */
+.fmt{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:15px 17px;margin-bottom:16px;box-shadow:var(--shadow)}
+.fmt h3{font-size:12.5px;font-weight:700;margin:0 0 3px}
+.fmt .cap{font-size:11px;color:var(--ink-3);margin-bottom:10px}
+.brow{display:grid;grid-template-columns:104px minmax(0,1fr) 74px;gap:10px;align-items:center;
+  padding:4px 0;font-size:11.5px}
+.brow .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.brow .track{height:9px;background:var(--panel-2);border-radius:5px;overflow:hidden}
+.brow .track i{display:block;height:100%;background:var(--deemph);border-radius:5px}
+.brow.lead .track i{background:var(--accent)}
+.brow .val{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+.brow .val small{display:block;font-weight:400;color:var(--ink-3);font-size:9.5px}
+
 /* 「何を集めて、何を落としたか」の絞り込み経路 */
 .focus{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
   padding:15px 17px;margin-bottom:18px;box-shadow:var(--shadow)}
@@ -446,6 +462,7 @@ th.r,td.r{text-align:right}
 const S = {
   view:"today", window:72, sort:"views", q:"",
   kind:"all", videoCounts:null,       // 商品紹介動画の絞り込み状態と内訳
+  formats:null,                       // どういう型の紹介動画が伸びているか
   meta:null, summary:null, products:[], videos:[], tags:[], creators:[],
   jobTimer:null, lastJob:0, tableMode:false,
 };
@@ -582,7 +599,7 @@ function spark(vals,w,h){
 const VIEWS = {
   today:    {title:"今日の一手",   sub:"実際に伸びている紹介動画から、今撮るべき商品を決める"},
   products: {title:"商品",         sub:"商品リンク付きの紹介動画だけから抽出。クリックで根拠を表示"},
-  videos:   {title:"商品紹介動画", sub:"商品紹介と判定した動画だけ。絞り込みで確認できます"},
+  videos:   {title:"商品紹介動画", sub:"どういう型の紹介動画が伸びているか。対象は商品紹介と判定した動画だけ"},
   hashtags: {title:"ハッシュタグ", sub:"伸びている紹介動画が実際に使っているタグ"},
   creators: {title:"クリエイター", sub:"同じジャンルで結果を出している投稿者"},
   map:      {title:"機会マップ",   sub:"競合の少なさ × 勢い。左上が狙い目"},
@@ -817,10 +834,43 @@ function viewVideos(){
   <div style="font-size:11.5px;color:var(--ink-3);margin-bottom:14px">
     ${esc(KINDS.find(k=>k[0]===S.kind)?.[2]||"")} ・ ${S.videos.length} 本を表示中
   </div>`;
-  if(!S.videos.length)return ctl+`<div class="empty">
+  const fm=formatsPanel();
+  if(!S.videos.length)return fm+ctl+`<div class="empty">
     <h3>この条件に当てはまる紹介動画がありません</h3>
     <p>絞り込みを緩めるか、収集を重ねてください。</p></div>`;
-  return ctl+`<div class="vgrid">${S.videos.map(videoCard).join("")}</div>`;
+  return fm+ctl+`<div class="vgrid">${S.videos.map(videoCard).join("")}</div>`;
+}
+
+/* ---------------------------------------------------- どういう型が伸びているか
+   個々の動画を眺めても「次に何を撮るか」は決まらない。
+   切り口と長さという 2 つの型で中央値を比べて、撮り方の当たりを付ける。 */
+function barRow(r, max, lead){
+  const w=Math.max(3,Math.round((r.median_views/max)*100));
+  const tip=`${r.name} — ${r.videos}本 ／ 保存率 ${rate(r.save_rate)}`
+    +(r.with_shop_link?` ／ 商品リンク付き ${r.with_shop_link}本`:"");
+  return `<div class="brow${lead?" lead":""}" title="${esc(tip)}">
+    <div class="nm">${esc(r.name)}</div>
+    <div class="track"><i style="width:${w}%"></i></div>
+    <div class="val">${n(r.median_views)}<small>${r.videos}本</small></div>
+  </div>`;
+}
+function barList(title, cap, rows){
+  if(!rows||!rows.length)return "";
+  const max=Math.max(...rows.map(r=>r.median_views))||1;
+  const best=rows.reduce((a,b)=>b.median_views>a.median_views?b:a,rows[0]);
+  return `<div><h3>${title}</h3><div class="cap">${cap}</div>
+    ${rows.map(r=>barRow(r,max,r===best)).join("")}</div>`;
+}
+function formatsPanel(){
+  const f=S.formats; if(!f||!f.total)return "";
+  const q=barList("伸びている切り口",
+    "その動画を見つけた検索語ごとの中央値再生。上ほど伸びやすい撮り方",
+    (f.queries||[]).slice(0,7));
+  const d=barList("伸びている長さ",
+    "尺ごとの中央値再生。同じ商品でも尺で結果が変わる",
+    f.durations||[]);
+  if(!q&&!d)return "";
+  return `<div class="fmt">${q}${d}</div>`;
 }
 
 /* ------------------------------------------------- 分析対象パネル（絞り込み経路）
@@ -1184,13 +1234,15 @@ async function loadAll(){
   const page=$("page"); page.classList.add("loading");
   try{
     const w=S.window;
-    const [sum,prod,tags,cre]=await Promise.all([
+    const [sum,prod,tags,cre,fmt]=await Promise.all([
       api(`/api/summary?window=${w}`),
       api(`/api/signals?window=${w}&type=product&limit=200`),
       api(`/api/signals?window=${w}&type=hashtag&limit=80`),
       api(`/api/signals?window=${w}&type=creator&limit=80`),
+      api(`/api/formats?window=${w}`).catch(()=>null),
     ]);
     S.summary=sum; S.products=prod.rows; S.tags=tags.rows; S.creators=cre.rows;
+    S.formats=fmt;
     S.sort = S.sort||"views";
     await loadVideos();
     $("nProducts").textContent=S.products.length||"";

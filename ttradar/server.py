@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import statistics
 import threading
 import time
 import webbrowser
@@ -272,6 +273,68 @@ class Api:
             return {"count": len(rows), "counts": counts, "kind": kind,
                     "rows": rows[:limit]}
 
+    def formats(self, window: float | None, region: str | None) -> dict[str, Any]:
+        """「どういう商品紹介動画が伸びているか」を型ごとに集計する.
+
+        個々の動画を眺めるだけでは「次に自分が何を撮るか」は決まらない。
+        知りたいのは *型* — どの切り口で、どのくらいの長さで撮ると伸びるか。
+
+        2 つの軸で出す:
+
+        切り口
+            その動画を見つけた検索語。「正直レビュー」で出てくる動画と
+            「購入品紹介」で出てくる動画では伸び方が違う。
+        長さ
+            15 秒の紹介と 45 秒の紹介では成績が変わる。
+
+        合計ではなく **中央値** で比べる。1 本のバズに引っ張られると
+        「その型なら自分も伸びる」の判断材料にならないため。
+        """
+        with Database(self.cfg.db_path) as db:
+            digest = Radar(self.cfg, db).analyze(region=region, window_hours=window)
+            vids = []
+            for sig in digest.by_type.get(EntityType.VIDEO, []):
+                ex = self._latest_extra(db, sig.entity_key)
+                vids.append((sig.metrics or {}, ex))
+
+        def agg(name: str, rows: list[tuple[dict, dict]]) -> dict[str, Any] | None:
+            views = [r[0].get(M.VIEWS) for r in rows]
+            views = [v for v in views if v]
+            if not views:
+                return None
+            srate = [r[0].get(M.SAVE_RATE) for r in rows]
+            srate = [v for v in srate if v]
+            vel = [r[0].get(M.VELOCITY) for r in rows]
+            vel = [v for v in vel if v]
+            return {
+                "name": name,
+                "videos": len(rows),
+                "median_views": statistics.median(views),
+                "save_rate": statistics.median(srate) if srate else None,
+                "velocity": statistics.median(vel) if vel else None,
+                "with_shop_link": sum(1 for r in rows if r[1].get("product")),
+            }
+
+        by_q: dict[str, list] = {}
+        for m, ex in vids:
+            q = str(ex.get("query") or "その他")
+            by_q.setdefault(q, []).append((m, ex))
+        queries = [a for a in (agg(k, v) for k, v in by_q.items()) if a]
+        queries.sort(key=lambda a: a["median_views"], reverse=True)
+
+        by_d: dict[str, list] = {}
+        for m, ex in vids:
+            d = m.get(M.DURATION)
+            if not d:
+                continue
+            label = ("〜15秒" if d < 15 else "15〜30秒" if d < 30
+                     else "30〜60秒" if d < 60 else "60秒〜")
+            by_d.setdefault(label, []).append((m, ex))
+        order = ["〜15秒", "15〜30秒", "30〜60秒", "60秒〜"]
+        durations = [a for a in (agg(k, by_d[k]) for k in order if k in by_d) if a]
+
+        return {"total": len(vids), "queries": queries, "durations": durations}
+
     def history(self, key: str) -> dict[str, Any]:
         """詳細チャート用の完全な時系列."""
         with Database(self.cfg.db_path) as db:
@@ -412,6 +475,8 @@ class Handler(BaseHTTPRequestHandler):
                     fnum("window"), one("region"), one("sort", "views"),
                     one("q"), int(one("limit", 60) or 60),
                     one("kind", "all")))
+            if u.path == "/api/formats":
+                return self._json(self.api.formats(fnum("window"), one("region")))
             if u.path == "/api/history":
                 key = one("key")
                 if not key:
